@@ -12,19 +12,17 @@ type
 class Share of Facet
 
 class Delegate of Facet:
-    var hook*: pointer # part of unsafety mentioned above
+    var builder*: pointer # part of unsafety mentioned above
 
 proc get*[T](app: var App, target: typedesc[T]): T =
-    result = nil
 
-    for node in app.config:
-        if node.target == target.TypeID:
-            if node.facet.matches(Delegate):
-                #
-                # Here we cast the generic function pointer to the right type -- hopefully this
-                # just crashes if the structure of the provided hook is wrong?
-                #
-                result = cast[DelegateHook[T]](node.facet.Delegate.hook)(app)
+    let delegate = app.config.findOne(target, Delegate)
 
-    if result == nil:
+    if delegate != nil:
+        #
+        # Here we cast the generic function pointer to the right type -- hopefully this
+        # just crashes if the structure of the provided hook is wrong?
+        #
+        result = cast[DelegateHook[T]](delegate.Delegate.builder)(app)
+    else:
         result = T.new()

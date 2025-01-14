@@ -13,15 +13,15 @@ export
 # Config
 #
 
-macro scan(folder: static[string], ext: static[string]) =
+macro scan*(folder: static[string], ext: static[string] = ".nim") =
     result = newStmtList()
 
     for file in os.walkDirRec(folder, checkDir=true):
-
         if file.endsWith(ext):
             result.add(nnkImportStmt.newTree(newIdentNode(file[0 ..< ^ext.len])))
 
-scan("./local", ".nim")
+    result.add(quote do:
+        when defined(debug):
+            echo "Total facets loaded: ", config.len
+    )
 
-when defined(debug):
-    echo "Total shapes loaded: ", config.len
