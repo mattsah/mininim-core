@@ -1,6 +1,5 @@
 import
     std/sugar,
-    std/dynlib,
     std/macros,
     std/macrocache,
     std/typetraits,
@@ -13,17 +12,17 @@ import
 
 export
     sugar,
-    dynlib,
+    macros,
     internal,
     typetraits
 
 #
-# Base Coverters, Methods and Macros
+# Base Converters, Methods and Macros
 #
 
-type TypeID* = uint16
+const nextTypeID = CacheCounter("mininim.types")
 
-const nextTypeID = CacheCounter("nextTypeID")
+type TypeID* = uint16
 
 converter typeID*(T:typedesc): TypeID =
     const id = nextTypeID.value
@@ -57,13 +56,25 @@ macro init*(self: typedesc, args: varargs[untyped]): auto =
 
 class Facet:
     var
+        id*: int
         kind*: TypeID
         target*: TypeID
         hook*: pointer
 
+
+proc call*[T](this: Facet, calltype: typedesc[T]): T =
+    result = cast[calltype](this.hook)
+
+proc matches*(this: Facet, kind: typedesc): bool =
+    return this.kind == kind.TypeID
+
+proc matches*(this: Facet, target: typedesc, kind: typedesc): bool =
+    return this.target == target.TypeID and this.kind == kind.TypeID
+
 class Hook of Facet:
     var
-        call*: string
+        id*: 0
+        call*: pointer
 
 class Config:
     var
@@ -75,42 +86,83 @@ class Config:
     method len*(): int {. base .} =
         result = this.data.len
 
-class App:
-    var
-        config*: Config
-
-method init*(this: App, config: var Config): void {.base.} =
-    this.config = config
-
-proc matches*(this: Facet, kind: typedesc): bool =
-    return this.kind == kind.TypeID
-
-proc matches*(this: Facet, target: typedesc, kind: typedesc): bool =
-    return this.target == target.TypeID and this.kind == kind.TypeID
-
-proc findOne*(this: var Config, target: typedesc, kind: typedesc): Facet =
-    let results = this.findAll(kind, (kind: target.TypeID))
+proc findOne*[T](this: Config, kind: typedesc[T], target: typedesc): T =
+    let results = this.findAll(kind, (target: target.TypeID))
 
     if results.len > 0:
         result = results[0]
     else:
         result = nil
 
-proc findAll*(this: var Config, kind: typedesc, query: tuple = ()): seq[Facet] =
-    result = @[]
-
+proc findAll*[T](this: Config, kind: typedesc[T], query: tuple = ()): seq[T] =
     for facet in this.data:
         if facet.matches(kind):
-            result.add(facet)
+            #
+            # Implement query
+            #
+            result.add(facet.T)
 
-var config* {. global .}: Config = Config()
-let lib*: LibHandle = loadLib()
+var config* {. global .} = Config()
 
+class App:
+    var
+        config*: Config
 
-macro shape*(target: typedesc, body: typed) =
+    method init*(config: var Config): void {.base.} =
+        this.config = config
+
+const facets = CacheSeq("mininim.facets")
+var lookup {. compileTime .} : seq[
+    tuple[
+        domain: string,
+        target: TypeID,
+        kind: TypeID,
+        idx: int
+    ]
+]
+
+proc walkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
+    result = callback(node)
+
+    for child in node:
+        result.add(walkTree(child, callback))
+
+macro hook(property: untyped) =
     result = newStmtList()
 
-    var copy  = copyNimTree(body)
+    var
+        hookNode: NimNode
+        domain: string
+
+    let current = lookup[high lookup]
+
+    block findCall:
+        for facet in lookup:
+            if facet.kind == Hook.TypeID and current.kind == facet.target:
+                domain = facet.domain
+                for node in facets[facet.idx]:
+                    if node.kind == nnkExprColonExpr and node[0].strVal == "call":
+                        hookNode = node[1]
+                        break findCall
+
+    if hookNode != nil:
+        hookNode = walkTree(
+            hookNode,
+            proc(node: NimNode): NimNode =
+                if node.kind == nnkIdent and node.strVal == domain:
+                    return newIdentNode(current.domain)
+
+                return copyNimNode(node)
+        )
+
+        result = quote do:
+            `property` = `hookNode`
+
+
+macro shape*(target: typedesc, body: untyped) =
+    result = newStmtList()
+
+    var copy = copyNimTree(body)
     var count = 0
 
     for item in copy[0][1]:
@@ -119,23 +171,12 @@ macro shape*(target: typedesc, body: typed) =
 
         if item.kind == nnkObjConstr:
             node = item
-        elif item.kind == nnkHiddenSubConv:
-            node = item[1]
+        if item.kind == nnkCall:
+            node = newNimNode(nnkObjConstr).add(item[0]);
 
         if node != nil:
-            kind = node[0]
-
-            node.insert(1, newColonExpr(
-                newIdentNode("hook"),
-                quote do: (
-                    let facet = config.findOne(`target`, Hook)
-
-                    if facet == nil:
-                        nil.pointer
-                    else:
-                        lib.symAddr(facet.Hook.call)
-                )
-            ))
+            kind   = node[0]
+            count += 1
 
             node.insert(1, newColonExpr(
                 newIdentNode("target"),
@@ -147,11 +188,25 @@ macro shape*(target: typedesc, body: typed) =
                 quote do: `kind`.TypeID
             ))
 
-            count += 1
+            facets.add(node)
+
+            var facet = newIntLitNode(facets.len - 1)
 
             result.add(
                 quote do:
-                    config.add(`node`.Facet)
+                    static:
+                        lookup.add((
+                            domain: $`target`,
+                            target: `target`.TypeID,
+                            kind: `kind`.TypeID,
+                            idx: `facet`
+                        ))
+
+                    var facet = `node`
+
+                    hook(facet.hook)
+
+                    config.add(facet)
             )
 
     when defined(debug):

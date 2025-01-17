@@ -1,28 +1,30 @@
 import
     mininim
 
-#
-# This seems inherently unsafe, but although we ultimately cast the hook function as a DelegateHook
-# we initially simply take it in as a generic pointer.  There seems to be no way to make a generic
-# procedure the type of an object property.
-#
-type
-    DelegateHook[T] = proc(app: var App): T {.cdecl.}
-
 class Share of Facet
 
+type DelegateHook*[T] = proc(app: var App): T {. cdecl .}
+
 class Delegate of Facet:
-    var builder*: pointer # part of unsafety mentioned above
+    method build(app: var App): Delegate {. static .}
+
+shape Delegate: @[
+    #[
+        The call property of the `Hook` should effectively act as a template, parsed as NimNode
+        then modified such that any appearances of the Hook's target (Delegate in this case)
+        are replaced by the target when it is copied to teh `Delegate.hook` Facet for some other
+        class.
+    ]#
+    Hook(
+        call: proc(app: var App): Delegate =
+            result = Delegate.build(app)
+    )
+]
 
 proc get*[T](app: var App, target: typedesc[T]): T =
-
-    let delegate = app.config.findOne(target, Delegate)
+    let delegate = app.config.findOne(Delegate, target)
 
     if delegate != nil:
-        #
-        # Here we cast the generic function pointer to the right type -- hopefully this
-        # just crashes if the structure of the provided hook is wrong?
-        #
-        result = cast[DelegateHook[T]](delegate.Delegate.builder)(app)
+        result = cast[DelegateHook[T]](delegate.hook)(app)
     else:
         result = T.new()
