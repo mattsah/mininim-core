@@ -10,4 +10,3 @@ srcDir        = "src"
 # Dependencies
 
 requires "nim >= 2.2.0"
-requires "https://github.com/jjv360/nim-classes >= 0.3.17"

@@ -28,16 +28,14 @@ export
 
 const nextTypeID = CacheCounter("mininim.types")
 
-type TypeID* = uint16
+type
+    TypeID* = uint16
 
 converter typeID*(T:typedesc): TypeID =
     const id = nextTypeID.value
     static:
         inc nextTypeID
     return id.TypeID
-
-method init*(this: RootObj): void {.base.} =
-    discard
 
 macro class*(head: untyped): untyped =
     return newClassDescription("class", head, newStmtList()).compile()
@@ -149,7 +147,7 @@ proc walkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {.
     for child in node:
         result.add(walkTree(child, callback))
 
-macro hook(property: untyped) =
+macro resolve(property: untyped) =
     result = newStmtList()
 
     var
@@ -178,9 +176,17 @@ macro hook(property: untyped) =
                 return copyNimNode(node)
         )
 
-        result = quote do:
-            `property` = `hookNode`
+        result.add(
+            quote do:
+                if `property`.hook == nil:
+                    `property`.hook = `hookNode`
+        )
 
+    if currentPlan.class != Hook.TypeID:
+        result.add(
+            quote do:
+                config.add(`property`)
+        )
 
 macro shape*(scope: typedesc, body: untyped) =
     result = newStmtList()
@@ -232,10 +238,8 @@ macro shape*(scope: typedesc, body: untyped) =
 
                     var facet = `facet`
 
-                    if facet.hook == nil:
-                        hook(facet.hook)
+                    resolve(facet)
 
-                    config.add(facet)
             )
 
     when defined(debug):
