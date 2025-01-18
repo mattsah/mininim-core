@@ -1,6 +1,9 @@
 import
+    std/json,
     std/sugar,
     std/macros,
+    std/tables,
+    std/marshal,
     std/macrocache,
     std/typetraits,
     classes/internal,
@@ -11,8 +14,11 @@ import
     classes/plugin_mixins
 
 export
+    json,
     sugar,
     macros,
+    tables,
+    marshal,
     internal,
     typetraits
 
@@ -50,30 +56,42 @@ macro init*(self: typedesc, args: varargs[untyped]): auto =
             let this: `self` = system.new(`self`)
             this
 
+proc `%`*(p: pointer): JsonNode =
+    result = JsonNode()
+
+proc `%`*(t: tuple): JsonNode =
+  result = newJObject()
+  for k, v in t.fieldPairs():
+    result[k] = %v
+
 #
-#   Core library
+#   Core runtime library
 #
 
 class Facet:
     var
-        id*: int
-        kind*: TypeID
-        target*: TypeID
         hook*: pointer
-
+        class*: TypeID
+        scope*: TypeID
 
 proc call*[T](this: Facet, calltype: typedesc[T]): T =
     result = cast[calltype](this.hook)
 
-proc matches*(this: Facet, kind: typedesc): bool =
-    return this.kind == kind.TypeID
+proc matches*(this: Facet, class: typedesc, query: tuple = ()): bool =
+    if this.class != class.typeID:
+        return false
 
-proc matches*(this: Facet, target: typedesc, kind: typedesc): bool =
-    return this.target == target.TypeID and this.kind == kind.TypeID
+    let target = % cast[class](this)
+    let params = % query
+
+    for key, val in params.getFields():
+        if target.hasKey(key) and target[key] != val:
+            return false
+
+    return true
 
 class Hook of Facet:
     var
-        id*: 0
         call*: pointer
 
 class Config:
@@ -86,20 +104,17 @@ class Config:
     method len*(): int {. base .} =
         result = this.data.len
 
-proc findOne*[T](this: Config, kind: typedesc[T], target: typedesc): T =
-    let results = this.findAll(kind, (target: target.TypeID))
+proc findOne*[T](this: Config, class: typedesc[T], query: tuple = ()): T =
+    let results = this.findAll(class, query)
 
     if results.len > 0:
         result = results[0]
     else:
         result = nil
 
-proc findAll*[T](this: Config, kind: typedesc[T], query: tuple = ()): seq[T] =
+proc findAll*[T](this: Config, class: typedesc[T], query: tuple = ()): seq[T] =
     for facet in this.data:
-        if facet.matches(kind):
-            #
-            # Implement query
-            #
+        if facet.matches(class, query):
             result.add(facet.T)
 
 var config* {. global .} = Config()
@@ -111,15 +126,22 @@ class App:
     method init*(config: var Config): void {.base.} =
         this.config = config
 
-const facets = CacheSeq("mininim.facets")
-var lookup {. compileTime .} : seq[
-    tuple[
-        domain: string,
-        target: TypeID,
-        kind: TypeID,
-        idx: int
+#
+# Metaprogramming framework
+#
+
+type
+    PlansSeq = seq[
+        tuple[
+            realm: string,
+            class: TypeID,
+            scope: TypeID,
+            index: int
+        ]
     ]
-]
+
+var facetNodes {. compileTime .}: CacheSeq = CacheSeq("mininim.facets")
+var facetPlans {. compileTime .}: PlansSeq
 
 proc walkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
     result = callback(node)
@@ -132,15 +154,16 @@ macro hook(property: untyped) =
 
     var
         hookNode: NimNode
-        domain: string
+        proxyRealm: string
 
-    let current = lookup[high lookup]
+    let currentPlan = facetPlans[high facetPlans]
 
     block findCall:
-        for facet in lookup:
-            if facet.kind == Hook.TypeID and current.kind == facet.target:
-                domain = facet.domain
-                for node in facets[facet.idx]:
+        for facetPlan in facetPlans:
+            if facetPLan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
+                proxyRealm = facetPlan.realm
+
+                for node in facetNodes[facetPlan.index]:
                     if node.kind == nnkExprColonExpr and node[0].strVal == "call":
                         hookNode = node[1]
                         break findCall
@@ -149,8 +172,8 @@ macro hook(property: untyped) =
         hookNode = walkTree(
             hookNode,
             proc(node: NimNode): NimNode =
-                if node.kind == nnkIdent and node.strVal == domain:
-                    return newIdentNode(current.domain)
+                if node.kind == nnkIdent and node.strVal == proxyRealm:
+                    return newIdentNode(currentPlan.realm)
 
                 return copyNimNode(node)
         )
@@ -159,55 +182,61 @@ macro hook(property: untyped) =
             `property` = `hookNode`
 
 
-macro shape*(target: typedesc, body: untyped) =
+macro shape*(scope: typedesc, body: untyped) =
     result = newStmtList()
 
     var copy = copyNimTree(body)
     var count = 0
 
+    #
+    # Begin looping over each facet
+    #
+
     for item in copy[0][1]:
-        var node: NimNode = nil
-        var kind: NimNode = nil
+        var facet: NimNode = nil
+        var class: NimNode = nil
 
         if item.kind == nnkObjConstr:
-            node = item
+            facet = item
         if item.kind == nnkCall:
-            node = newNimNode(nnkObjConstr).add(item[0]);
+            facet = newNimNode(nnkObjConstr).add(item[0]) # Convert to object
 
-        if node != nil:
-            kind   = node[0]
-            count += 1
+        if facet != nil:
+            class = facet[0]
 
-            node.insert(1, newColonExpr(
-                newIdentNode("target"),
-                quote do: `target`.TypeID
+            inc count
+
+            facet.insert(1, newColonExpr(
+                newIdentNode("scope"),
+                quote do: `scope`.TypeID
             ))
 
-            node.insert(1, newColonExpr(
-                newIdentNode("kind"),
-                quote do: `kind`.TypeID
+            facet.insert(1, newColonExpr(
+                newIdentNode("class"),
+                quote do: `class`.TypeID
             ))
 
-            facets.add(node)
+            facetNodes.add(facet)
 
-            var facet = newIntLitNode(facets.len - 1)
+            var facetNodeIndex = newIntLitNode(facetNodes.len - 1)
 
             result.add(
                 quote do:
                     static:
-                        lookup.add((
-                            domain: $`target`,
-                            target: `target`.TypeID,
-                            kind: `kind`.TypeID,
-                            idx: `facet`
+                        facetPlans.add((
+                            realm: $`scope`,
+                            class: `class`.TypeID,
+                            scope: `scope`.TypeID,
+                            index: `facetNodeIndex`
                         ))
 
-                    var facet = `node`
+                    var facet = `facet`
 
-                    hook(facet.hook)
+                    if facet.hook == nil:
+                        hook(facet.hook)
 
                     config.add(facet)
             )
 
     when defined(debug):
-        echo "Loading shape for: ", target.strVal, " (", count ," Facets)"
+        echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"

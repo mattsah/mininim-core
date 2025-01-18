@@ -22,7 +22,7 @@ shape Delegate: @[
 ]
 
 proc get*[T](app: var App, target: typedesc[T]): T =
-    let delegate = app.config.findOne(Delegate, target)
+    let delegate = app.config.findOne(Delegate, (scope: target.TypeID))
 
     if delegate != nil:
         result = cast[DelegateHook[T]](delegate.hook)(app)
