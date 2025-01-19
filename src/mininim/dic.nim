@@ -1,12 +1,18 @@
 import
-    mininim
+    mininim,
+    std/tables
 
-class Share of Facet
+type
+    Shared* = ref object of Facet
+    Delegate* = ref object of Facet
+    DelegateHook*[T] = proc(app: var App): T {. cdecl .}
 
-type DelegateHook*[T] = proc(app: var App): T {. cdecl .}
+var
+    store = newTable[TypeID, pointer]()
 
-class Delegate of Facet:
-    method build(app: var App): Delegate {. static .}
+begin Delegate:
+    proc build(self: typedesc[Delegate], app: var App): Delegate =
+        discard
 
 shape Delegate: @[
     #[
@@ -21,10 +27,19 @@ shape Delegate: @[
     )
 ]
 
-proc get*[T](app: var App, target: typedesc[T]): T =
-    let delegate = app.config.findOne(Delegate, (scope: target.TypeID))
+begin App:
+    proc get*[T](app: var App, target: typedesc[T]): T =
+        let delegate = app.config.findOne(Delegate, (scope: target.TypeID))
+        let shared   = app.config.findOne(Shared, (scope: target.TypeID))
 
-    if delegate != nil:
-        result = cast[DelegateHook[T]](delegate.hook)(app)
-    else:
-        result = T.new()
+        if shared != nil and store.hasKey(target.TypeID):
+            result = cast[T](store[target.TypeID])
+
+        else:
+            if delegate != nil:
+                result = cast[DelegateHook[T]](delegate.hook)(app)
+            else:
+                result = T.new()
+
+            if shared != nil:
+                store[target.TypeID] = cast[pointer](result)

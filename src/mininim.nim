@@ -4,14 +4,9 @@ import
     std/macros,
     std/tables,
     std/marshal,
+    std/sequtils,
     std/macrocache,
-    std/typetraits,
-    classes/internal,
-    classes/plugin_variables,
-    classes/plugin_methods,
-    classes/plugin_destructors,
-    classes/plugin_super,
-    classes/plugin_mixins
+    std/typetraits
 
 export
     json,
@@ -19,40 +14,42 @@ export
     macros,
     tables,
     marshal,
-    internal,
+    sequtils,
     typetraits
-
-#
-# Base Converters, Methods and Macros
-#
-
-const nextTypeID = CacheCounter("mininim.types")
 
 type
     TypeID* = uint16
 
-converter typeID*(T:typedesc): TypeID =
-    const id = nextTypeID.value
-    static:
-        inc nextTypeID
-    return id.TypeID
+    Class* = ref object of RootObj
 
-macro class*(head: untyped): untyped =
-    return newClassDescription("class", head, newStmtList()).compile()
+    Plan* = tuple[
+        realm: string,
+        class: TypeID,
+        scope: TypeID,
+        index: int
+    ]
 
-macro class*(head: untyped, body: untyped): untyped =
-    return newClassDescription("class", head, body).compile()
+    App* = ref object of Class
+        config*: Config
 
-macro init*(self: typedesc, args: varargs[untyped]): auto =
-    if args.len > 0:
-        result = quote do:
-            let this: `self` = system.new(`self`)
-            this.init(`args`)
-            this
-    else:
-        result = quote do:
-            let this: `self` = system.new(`self`)
-            this
+    Config* = ref object of Class
+        data: seq[Facet]
+
+    Facet* = ref object of Class
+        hook*: pointer
+        class*: TypeID
+        scope*: TypeID
+
+    Hook* = ref object of Facet
+        call*: pointer
+
+const
+    facetNodes = CacheSeq("mininim.facets")
+    nextTypeID = CacheCounter("mininim.types")
+
+var
+    facetPlans* {. compileTime .} = newSeq[Plan]()
+    config* {. global .} = Config()
 
 proc `%`*(p: pointer): JsonNode =
     result = JsonNode()
@@ -62,90 +59,34 @@ proc `%`*(t: tuple): JsonNode =
   for k, v in t.fieldPairs():
     result[k] = %v
 
-#
-#   Core runtime library
-#
-
-class Facet:
-    var
-        hook*: pointer
-        class*: TypeID
-        scope*: TypeID
-
-proc call*[T](this: Facet, calltype: typedesc[T]): T =
-    result = cast[calltype](this.hook)
-
-proc matches*(this: Facet, class: typedesc, query: tuple = ()): bool =
-    if this.class != class.typeID:
-        return false
-
-    let target = % cast[class](this)
-    let params = % query
-
-    for key, val in params.getFields():
-        if target.hasKey(key) and target[key] != val:
-            return false
-
-    return true
-
-class Hook of Facet:
-    var
-        call*: pointer
-
-class Config:
-    var
-        data: seq[Facet]
-
-    method add*(facet: Facet): void {. base .} =
-        this.data.add(facet)
-
-    method len*(): int {. base .} =
-        result = this.data.len
-
-proc findOne*[T](this: Config, class: typedesc[T], query: tuple = ()): T =
-    let results = this.findAll(class, query)
-
-    if results.len > 0:
-        result = results[0]
-    else:
-        result = nil
-
-proc findAll*[T](this: Config, class: typedesc[T], query: tuple = ()): seq[T] =
-    for facet in this.data:
-        if facet.matches(class, query):
-            result.add(facet.T)
-
-var config* {. global .} = Config()
-
-class App:
-    var
-        config*: Config
-
-    method init*(config: var Config): void {.base.} =
-        this.config = config
-
-#
-# Metaprogramming framework
-#
-
-type
-    PlansSeq = seq[
-        tuple[
-            realm: string,
-            class: TypeID,
-            scope: TypeID,
-            index: int
-        ]
-    ]
-
-var facetNodes {. compileTime .}: CacheSeq = CacheSeq("mininim.facets")
-var facetPlans {. compileTime .}: PlansSeq
-
 proc walkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
     result = callback(node)
 
     for child in node:
         result.add(walkTree(child, callback))
+
+converter typeID*(T:typedesc): TypeID =
+    const id = nextTypeID.value
+
+    static:
+        inc nextTypeID
+
+    result = id.TypeID
+
+macro begin*(scope: typedesc, body: untyped): untyped =
+    result = quote do:
+        `body`
+
+macro init*(self: typedesc, args: varargs[untyped]): auto =
+    if args.len > 0:
+        result = quote do:
+            var this: `self` = system.new(`self`)
+            this.init(`args`)
+            this
+    else:
+        result = quote do:
+            var this: `self` = system.new(`self`)
+            this
 
 macro resolve(property: untyped) =
     result = newStmtList()
@@ -158,7 +99,7 @@ macro resolve(property: untyped) =
 
     block findCall:
         for facetPlan in facetPlans:
-            if facetPLan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
+            if facetPlan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
                 proxyRealm = facetPlan.realm
 
                 for node in facetNodes[facetPlan.index]:
@@ -171,9 +112,9 @@ macro resolve(property: untyped) =
             hookNode,
             proc(node: NimNode): NimNode =
                 if node.kind == nnkIdent and node.strVal == proxyRealm:
-                    return newIdentNode(currentPlan.realm)
-
-                return copyNimNode(node)
+                    result = newIdentNode(currentPlan.realm)
+                else:
+                    result = copyNimNode(node)
         )
 
         result.add(
@@ -239,8 +180,49 @@ macro shape*(scope: typedesc, body: untyped) =
                     var facet = `facet`
 
                     resolve(facet)
-
             )
 
     when defined(debug):
         echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"
+
+begin Facet:
+    proc matches*(this: Facet, class: typedesc, query: tuple = ()): bool =
+        result = true
+
+        if this.class != class.typeID:
+            result = false
+        else:
+            let target = % cast[class](this)
+            let params = % query
+
+            for key, val in params.getFields():
+                if target.hasKey(key) and target[key] != val:
+                    result = false
+                    break
+
+begin Config:
+    method init*(this: var Config): void =
+        this.data = newSeq[Facet]()
+
+    method add*(this: var Config, facet: Facet): void =
+        this.data.add(facet)
+
+    method len*(this: var Config): int =
+        result = this.data.len()
+
+    proc findAll*[T](this: var Config, class: typedesc[T], query: tuple = ()): seq[T] =
+        for facet in this.data:
+            if facet.matches(class, query):
+                result.add(facet.T)
+
+    proc findOne*[T](this: var Config, class: typedesc[T], query: tuple = ()): T =
+        let results = this.findAll(class, query)
+
+        if results.len > 0:
+            result = results[0]
+        else:
+            result = nil
+
+begin App:
+    method init*(this: var App, config: var Config): void {.base.} =
+        this.config = config
