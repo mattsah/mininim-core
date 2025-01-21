@@ -59,11 +59,13 @@ proc `%`*(t: tuple): JsonNode =
   for k, v in t.fieldPairs():
     result[k] = %v
 
-proc walkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
+proc talkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
     result = callback(node)
 
     for child in node:
-        result.add(walkTree(child, callback))
+        result.add(talkTree(child, callback))
+
+template static*() {. pragma .}
 
 converter typeID*(T:typedesc): TypeID =
     const id = nextTypeID.value
@@ -73,9 +75,69 @@ converter typeID*(T:typedesc): TypeID =
 
     result = id.TypeID
 
-macro begin*(scope: typedesc, body: untyped): untyped =
-    result = quote do:
-        `body`
+macro begin*(scope: typedesc, body: untyped) =
+    let
+        target = scope.strVal
+
+    for i1, c1 in body:
+        if c1.kind in [nnkMethodDef, nnkProcDef]:
+            var stc = false
+            var abs = true
+
+            for i2, c2 in c1:
+                if c2.kind == nnkPragma:
+                    for i3, c3 in c2:
+                        if c3.kind == nnkIdent:
+                            if c3.strVal == "static":
+                                stc = true
+
+                elif c2.kind == nnkFormalParams:
+                    if c2[0].kind == nnkIdent:
+                        if c2[0].strVal == "self":
+                            c2[0] = newIdentNode(target)
+
+                    c2.insert(1, newNimNode(nnkIdentDefs))
+
+                elif c2.kind == nnkStmtList:
+                    abs = false
+
+                    if stc == false:
+                        c1[i2] = talkTree(
+                            c2,
+                            proc(node: NimNode): NimNode =
+                                result = copyNimNode(node)
+
+                                if node.kind == nnkIdent:
+                                    if node.strVal == "self":
+                                        result = newIdentNode(target)
+                        )
+
+            for i2, c2 in c1:
+                if c2.kind == nnkFormalParams:
+                    if stc == true:
+                        c2[1].add(newIdentNode("self"))
+                        c2[1].add(newNimNode(nnkBracketExpr).add(
+                            newIdentNode("typedesc"),
+                            newIdentNode(target)
+                        ))
+                        c2[1].add(newEmptyNode())
+
+                    else:
+                        c2[1].add(newIdentNode("this"))
+                        c2[1].add(newNimNode(nnkVarTy).add(
+                            newIdentNode(target)
+                        ))
+                        c2[1].add(newEmptyNode())
+
+                    break;
+
+            if abs:
+                c1[c1.len - 1] = newNimNode(nnkStmtList).add(
+                    quote do:
+                        discard
+                )
+
+    result = body
 
 macro init*(self: typedesc, args: varargs[untyped]): auto =
     if args.len > 0:
@@ -108,7 +170,7 @@ macro resolve(property: untyped) =
                         break findCall
 
     if hookNode != nil:
-        hookNode = walkTree(
+        hookNode = talkTree(
             hookNode,
             proc(node: NimNode): NimNode =
                 if node.kind == nnkIdent and node.strVal == proxyRealm:
@@ -186,7 +248,7 @@ macro shape*(scope: typedesc, body: untyped) =
         echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"
 
 begin Facet:
-    proc matches*(this: Facet, class: typedesc, query: tuple = ()): bool =
+    proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
 
         if this.class != class.typeID:
@@ -201,21 +263,21 @@ begin Facet:
                     break
 
 begin Config:
-    method init*(this: var Config): void =
+    method init*(): void =
         this.data = newSeq[Facet]()
 
-    method add*(this: var Config, facet: Facet): void =
+    method add*(facet: Facet): void =
         this.data.add(facet)
 
-    method len*(this: var Config): int =
+    method len*(): int =
         result = this.data.len()
 
-    proc findAll*[T](this: var Config, class: typedesc[T], query: tuple = ()): seq[T] =
-        for facet in this.data:
+    proc findAll*[T](class: typedesc[T], query: tuple = ()): seq[T] =
+        for facet in this.data.mitems:
             if facet.matches(class, query):
                 result.add(facet.T)
 
-    proc findOne*[T](this: var Config, class: typedesc[T], query: tuple = ()): T =
+    proc findOne*[T](class: typedesc[T], query: tuple = ()): T =
         let results = this.findAll(class, query)
 
         if results.len > 0:
@@ -224,5 +286,5 @@ begin Config:
             result = nil
 
 begin App:
-    method init*(this: var App, config: var Config): void {.base.} =
+    method init*(config: var Config): void {.base.} =
         this.config = config

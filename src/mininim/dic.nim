@@ -11,7 +11,7 @@ var
     store = newTable[TypeID, pointer]()
 
 begin Delegate:
-    proc build(self: typedesc[Delegate], app: var App): Delegate =
+    proc build(app: var App): Delegate {. static .}=
         discard
 
 shape Delegate: @[
@@ -28,16 +28,16 @@ shape Delegate: @[
 ]
 
 begin App:
-    proc get*[T](app: var App, target: typedesc[T]): T =
-        let delegate = app.config.findOne(Delegate, (scope: target.TypeID))
-        let shared   = app.config.findOne(Shared, (scope: target.TypeID))
+    proc get*[T](target: typedesc[T]): T =
+        let delegate = this.config.findOne(Delegate, (scope: target.TypeID))
+        let shared   = this.config.findOne(Shared, (scope: target.TypeID))
 
         if shared != nil and store.hasKey(target.TypeID):
             result = cast[T](store[target.TypeID])
 
         else:
             if delegate != nil:
-                result = cast[DelegateHook[T]](delegate.hook)(app)
+                result = cast[DelegateHook[T]](delegate.hook)(this)
             else:
                 result = T.new()
 
