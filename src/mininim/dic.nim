@@ -7,9 +7,6 @@ type
     Delegate* = ref object of Facet
     DelegateHook*[T] = proc(app: var App): T {. cdecl .}
 
-var
-    store = newTable[TypeID, pointer]()
-
 begin Delegate:
     proc build(app: var App): Delegate {. static .}=
         discard
@@ -32,8 +29,8 @@ begin App:
         let delegate = this.config.findOne(Delegate, (scope: target.TypeID))
         let shared   = this.config.findOne(Shared, (scope: target.TypeID))
 
-        if shared != nil and store.hasKey(target.TypeID):
-            result = cast[T](store[target.TypeID])
+        if shared != nil and this.store.hasKey(target.TypeID):
+            result = cast[T](this.store[target.TypeID])
 
         else:
             if delegate != nil:
@@ -42,4 +39,4 @@ begin App:
                 result = T.init()
 
             if shared != nil:
-                store[target.TypeID] = cast[pointer](result)
+                this.store[target.TypeID] = cast[pointer](result)

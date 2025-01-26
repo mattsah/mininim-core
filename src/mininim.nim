@@ -24,6 +24,7 @@ type
 
     App* = ref object of Class
         config*: Config
+        store* = newTable[TypeID, pointer]()
 
     Config* = ref object of Class
         data: seq[Facet]
@@ -51,7 +52,7 @@ var
     facetPlans* {. compileTime .} = newSeq[Plan]()
     config* {. global .} = Config()
 
-proc init*(this: auto) =
+proc init*(this: var auto) =
     discard
 
 proc `%`*(p: pointer): JsonNode =
@@ -77,14 +78,16 @@ converter typeID*(T:typedesc): TypeID =
     result = id.TypeID
 
 template static*() {. pragma .}
+template nomute*() {. pragma .}
 
 macro begin*(scope: typedesc, body: untyped) =
     let
         target = scope.strVal
 
     for i1, c1 in body:
-        if c1.kind in [nnkMethodDef, nnkProcDef]:
+        if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
             var stc = false
+            var cpy = false
             var abs = true
 
             for i2, c2 in c1:
@@ -93,6 +96,8 @@ macro begin*(scope: typedesc, body: untyped) =
                         if c3.kind == nnkIdent:
                             if c3.strVal == "static":
                                 stc = true
+                            if c3.strVal == "nomute":
+                                cpy = true
 
                 elif c2.kind == nnkFormalParams:
                     if c2[0].kind == nnkIdent:
@@ -123,14 +128,18 @@ macro begin*(scope: typedesc, body: untyped) =
                             newIdentNode("typedesc"),
                             newIdentNode(target)
                         ))
-                        c2[1].add(newEmptyNode())
+
+                    elif cpy == true:
+                        c2[1].add(newIdentNode("this"))
+                        c2[1].add(newIdentNode(target))
 
                     else:
                         c2[1].add(newIdentNode("this"))
                         c2[1].add(newNimNode(nnkVarTy).add(
                             newIdentNode(target)
                         ))
-                        c2[1].add(newEmptyNode())
+
+                    c2[1].add(newEmptyNode())
 
                     break;
 
@@ -165,31 +174,36 @@ macro resolve(property: untyped) =
 
     let currentPlan = facetPlans[high facetPlans]
 
-    block findCall:
-        for facetPlan in facetPlans:
-            if facetPlan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
-                proxyRealm = facetPlan.realm
+    for node in facetNodes[currentPlan.index]:
+        if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
+            hookNode = node[1]
+            break;
 
-                for node in facetNodes[facetPlan.index]:
-                    if node.kind == nnkExprColonExpr and node[0].strVal == "call":
-                        hookNode = node[1]
-                        break findCall
+    if hookNode == nil:
+        block findCall:
+            for facetPlan in facetPlans:
+                if facetPlan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
+                    proxyRealm = facetPlan.realm
 
-    if hookNode != nil:
-        hookNode = talkTree(
-            hookNode,
-            proc(node: NimNode): NimNode =
-                if node.kind == nnkIdent and node.strVal == proxyRealm:
-                    result = newIdentNode(currentPlan.realm)
-                else:
-                    result = copyNimNode(node)
-        )
+                    for node in facetNodes[facetPlan.index]:
+                        if node.kind == nnkExprColonExpr and node[0].strVal == "call":
+                            hookNode = node[1]
+                            break findCall
 
-        result.add(
-            quote do:
-                if `property`.hook == nil:
+        if hookNode != nil:
+            hookNode = talkTree(
+                hookNode,
+                proc(node: NimNode): NimNode =
+                    if node.kind == nnkIdent and node.strVal == proxyRealm:
+                        result = newIdentNode(currentPlan.realm)
+                    else:
+                        result = copyNimNode(node)
+            )
+
+            result.add(
+                quote do:
                     `property`.hook = `hookNode`
-        )
+            )
 
     if currentPlan.class != Hook.TypeID:
         result.add(
