@@ -20,14 +20,7 @@ export
 type
     TypeID* = uint16
 
-    Class* = ref object of RootObj
-
-    Plan* = tuple[
-        realm: string,
-        class: TypeID,
-        scope: TypeID,
-        index: int
-    ]
+    Class* {. inheritable .} = ref object
 
     App* = ref object of Class
         config*: Config
@@ -43,6 +36,13 @@ type
     Hook* = ref object of Facet
         call*: pointer
 
+    Plan* = tuple[
+        realm: string,
+        class: TypeID,
+        scope: TypeID,
+        index: int
+    ]
+
 const
     facetNodes = CacheSeq("mininim.facets")
     nextTypeID = CacheCounter("mininim.types")
@@ -50,6 +50,9 @@ const
 var
     facetPlans* {. compileTime .} = newSeq[Plan]()
     config* {. global .} = Config()
+
+proc init*(this: auto) =
+    discard
 
 proc `%`*(p: pointer): JsonNode =
     result = JsonNode()
@@ -65,8 +68,6 @@ proc talkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {.
     for child in node:
         result.add(talkTree(child, callback))
 
-template static*() {. pragma .}
-
 converter typeID*(T:typedesc): TypeID =
     const id = nextTypeID.value
 
@@ -74,6 +75,8 @@ converter typeID*(T:typedesc): TypeID =
         inc nextTypeID
 
     result = id.TypeID
+
+template static*() {. pragma .}
 
 macro begin*(scope: typedesc, body: untyped) =
     let
@@ -139,16 +142,19 @@ macro begin*(scope: typedesc, body: untyped) =
 
     result = body
 
-macro init*(self: typedesc, args: varargs[untyped]): auto =
+macro init*(self: typedesc, args: varargs[untyped]): untyped =
     if args.len > 0:
         result = quote do:
-            var this: `self` = system.new(`self`)
-            this.init(`args`)
-            this
+            block:
+                var this = system.new(`self`)
+                this.init(`args`)
+                this
     else:
         result = quote do:
-            var this: `self` = system.new(`self`)
-            this
+            block:
+                var this = system.new(`self`)
+                this.init()
+                this
 
 macro resolve(property: untyped) =
     result = newStmtList()
@@ -263,13 +269,13 @@ begin Facet:
                     break
 
 begin Config:
-    method init*(): void =
+    method init*(): void {. base .} =
         this.data = newSeq[Facet]()
 
-    method add*(facet: Facet): void =
+    method add*(facet: Facet): void {. base .}=
         this.data.add(facet)
 
-    method len*(): int =
+    method len*(): int {. base .} =
         result = this.data.len()
 
     proc findAll*[T](class: typedesc[T], query: tuple = ()): seq[T] =
@@ -286,5 +292,5 @@ begin Config:
             result = nil
 
 begin App:
-    method init*(config: var Config): void {.base.} =
+    method init*(config: var Config): void {. base .}=
         this.config = config

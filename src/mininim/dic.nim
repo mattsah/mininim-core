@@ -39,7 +39,7 @@ begin App:
             if delegate != nil:
                 result = cast[DelegateHook[T]](delegate.hook)(this)
             else:
-                result = T.new()
+                result = T.init()
 
             if shared != nil:
                 store[target.TypeID] = cast[pointer](result)
