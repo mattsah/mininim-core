@@ -24,10 +24,10 @@ type
 
     App* = ref object of Class
         config*: Config
-        store* = newTable[TypeID, pointer]()
+        store*: Table[TypeID, pointer]
 
     Config* = ref object of Class
-        data: seq[Facet]
+        data*: seq[Facet]
 
     Facet* = ref object of Class
         hook*: pointer
@@ -50,9 +50,11 @@ const
 
 var
     facetPlans* {. compileTime .} = newSeq[Plan]()
-    config* {. global .} = Config()
 
-proc init*(this: var auto) =
+let
+    config* = Config()
+
+proc init*(this: auto) =
     discard
 
 proc `%`*(p: pointer): JsonNode =
@@ -78,7 +80,7 @@ converter typeID*(T:typedesc): TypeID =
     result = id.TypeID
 
 template static*() {. pragma .}
-template nomute*() {. pragma .}
+template mutator*() {. pragma .}
 
 macro begin*(scope: typedesc, body: untyped) =
     let
@@ -87,7 +89,7 @@ macro begin*(scope: typedesc, body: untyped) =
     for i1, c1 in body:
         if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
             var stc = false
-            var cpy = false
+            var cpy = true
             var abs = true
 
             for i2, c2 in c1:
@@ -96,8 +98,8 @@ macro begin*(scope: typedesc, body: untyped) =
                         if c3.kind == nnkIdent:
                             if c3.strVal == "static":
                                 stc = true
-                            if c3.strVal == "nomute":
-                                cpy = true
+                            if c3.strVal == "mutator":
+                                cpy = false
 
                 elif c2.kind == nnkFormalParams:
                     if c2[0].kind == nnkIdent:
@@ -277,15 +279,12 @@ begin Facet:
             let target = % cast[class](this)
             let params = % query
 
-            for key, val in params.getFields():
+            for key, val in params.pairs:
                 if target.hasKey(key) and target[key] != val:
                     result = false
                     break
 
 begin Config:
-    method init*(): void {. base .} =
-        this.data = newSeq[Facet]()
-
     method add*(facet: Facet): void {. base .}=
         this.data.add(facet)
 
@@ -293,12 +292,13 @@ begin Config:
         result = this.data.len()
 
     proc findAll*[T](class: typedesc[T], query: tuple = ()): seq[T] =
-        for facet in this.data.mitems:
+        for facet in this.data:
             if facet.matches(class, query):
-                result.add(facet.T)
+                result.add(cast[T](facet))
 
     proc findOne*[T](class: typedesc[T], query: tuple = ()): T =
-        let results = this.findAll(class, query)
+        let
+            results = this.findAll(class, query)
 
         if results.len > 0:
             result = results[0]
@@ -306,5 +306,5 @@ begin Config:
             result = nil
 
 begin App:
-    method init*(config: var Config): void {. base .}=
+    method init*(config: Config): void {. base, mutator .}=
         this.config = config

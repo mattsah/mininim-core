@@ -5,10 +5,10 @@ import
 type
     Shared* = ref object of Facet
     Delegate* = ref object of Facet
-    DelegateHook*[T] = proc(app: var App): T {. cdecl .}
+    DelegateHook*[T] = proc(app: App): T {. nimcall .}
 
 begin Delegate:
-    proc build(app: var App): Delegate {. static .}=
+    proc build(app: App): Delegate {. static .}=
         discard
 
 shape Delegate: @[
@@ -19,7 +19,7 @@ shape Delegate: @[
         class.
     ]#
     Hook(
-        call: proc(app: var App): Delegate =
+        call: proc(app: App): Delegate =
             result = Delegate.build(app)
     )
 ]
