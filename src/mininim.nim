@@ -18,6 +18,8 @@ export
     typetraits
 
 type
+    TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
+
     TypeID* = uint16
 
     Class* {. inheritable .} = ref object
@@ -65,11 +67,12 @@ proc `%`*(t: tuple): JsonNode =
   for k, v in t.fieldPairs():
     result[k] = %v
 
-proc talkTree(node: NimNode, callback: proc(node: NimNode): NimNode): NimNode {. compileTime .} =
-    result = callback(node)
+proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
+    result = call(node, ctx)
 
-    for child in node:
-        result.add(talkTree(child, callback))
+    if result.len == 0 and result.kind == node.kind:
+        for i, child in node:
+            result.add(talkTree(child, call, node))
 
 converter typeID*(T:typedesc): TypeID =
     const id = nextTypeID.value
@@ -82,9 +85,14 @@ converter typeID*(T:typedesc): TypeID =
 template static*() {. pragma .}
 template mutator*() {. pragma .}
 
+macro super*(parent: typedesc): untyped =
+    result = quote do:
+        procCall `parent`(this)
+
 macro begin*(scope: typedesc, body: untyped) =
     let
         target = scope.strVal
+        parent = scope.getImpl[2][0][1][0].strVal
 
     for i1, c1 in body:
         if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
@@ -111,16 +119,49 @@ macro begin*(scope: typedesc, body: untyped) =
                 elif c2.kind == nnkStmtList:
                     abs = false
 
-                    if stc == false:
-                        c1[i2] = talkTree(
-                            c2,
-                            proc(node: NimNode): NimNode =
-                                result = copyNimNode(node)
+                    c1[i2] = talkTree(
+                        c2,
+                        proc(node: NimNode, ctx: NimNode): NimNode =
+                            result = copyNimNode(node)
 
-                                if node.kind == nnkIdent:
-                                    if node.strVal == "self":
+                            if node.kind == nnkCall and node[0].kind == nnkDotExpr:
+                                var
+                                    current = node[0]
+
+                                while current.kind in [nnkCall, nnkDotExpr]:
+                                    current = current[0]
+
+                                if current.strVal == "super":
+                                    result = newNimNode(nnkCommand).add(
+                                        newIdentNode("procCall"),
+                                        talkTree(
+                                            node,
+                                            proc(node: NimNode, ctx: NimNode): NimNode =
+                                                result = copyNimNode(node)
+
+                                                if node.kind == nnkIdent:
+                                                    if node.strVal == "super":
+                                                        result = newNimNode(nnkCall).add(
+                                                            newIdentNode(parent),
+                                                            newIdentNode("this")
+                                                        )
+                                        )
+                                    )
+
+                            if node.kind == nnkIdent:
+                                if node.strVal == "self":
+                                    if stc == false:
                                         result = newIdentNode(target)
-                        )
+
+                                elif node.strVal == "proto":
+                                    result = newIdentNode(parent)
+
+                                elif node.strVal == "super":
+                                    result = newNimNode(nnkCall).add(
+                                        newIdentNode(parent),
+                                        newIdentNode("this")
+                                    )
+                    )
 
             for i2, c2 in c1:
                 if c2.kind == nnkFormalParams:
@@ -171,7 +212,7 @@ macro resolve(property: untyped) =
     result = newStmtList()
 
     var
-        hookNode: NimNode
+        hookNode: NimNode = nil
         proxyRealm: string
 
     let currentPlan = facetPlans[high facetPlans]
@@ -195,7 +236,7 @@ macro resolve(property: untyped) =
         if hookNode != nil:
             hookNode = talkTree(
                 hookNode,
-                proc(node: NimNode): NimNode =
+                proc(node: NimNode, ctx: NimNode): NimNode =
                     if node.kind == nnkIdent and node.strVal == proxyRealm:
                         result = newIdentNode(currentPlan.realm)
                     else:
