@@ -85,10 +85,6 @@ converter typeID*(T:typedesc): TypeID =
 template static*() {. pragma .}
 template mutator*() {. pragma .}
 
-macro super*(parent: typedesc): untyped =
-    result = quote do:
-        procCall `parent`(this)
-
 macro begin*(scope: typedesc, body: untyped) =
     let
         target = scope.strVal
