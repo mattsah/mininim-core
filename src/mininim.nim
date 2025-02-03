@@ -37,6 +37,7 @@ type
         scope*: TypeID
 
     Hook* = ref object of Facet
+        swap*: TypeID
         call*: pointer
 
     Plan* = tuple[
@@ -207,48 +208,59 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
 macro resolve(property: untyped) =
     result = newStmtList()
 
-    var
-        hookNode: NimNode = nil
-        proxyRealm: string
-
     let currentPlan = facetPlans[high facetPlans]
 
-    for node in facetNodes[currentPlan.index]:
-        if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
-            hookNode = node[1]
-            break;
+    for facetPlan in facetPlans:
+        if currentPlan.class != facetPlan.scope:
+            continue
 
-    if hookNode == nil:
-        block findCall:
-            for facetPlan in facetPlans:
-                if facetPlan.class == Hook.TypeID and currentPlan.class == facetPlan.scope:
-                    proxyRealm = facetPlan.realm
+        #[
+            Handle hooks
+        ]#
+        if facetPlan.class == Hook.TypeID:
+            var
+                hookNode: NimNode = nil
+                swapIdent: string
 
-                    for node in facetNodes[facetPlan.index]:
-                        if node.kind == nnkExprColonExpr and node[0].strVal == "call":
-                            hookNode = node[1]
-                            break findCall
+            # Look to see if we have a pre-defined hook
+            for node in facetNodes[currentPlan.index]:
+                if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
+                    hookNode = node[1]
 
-        if hookNode != nil:
-            hookNode = talkTree(
-                hookNode,
-                proc(node: NimNode, ctx: NimNode): NimNode =
-                    if node.kind == nnkIdent and node.strVal == proxyRealm:
-                        result = newIdentNode(currentPlan.realm)
-                    else:
-                        result = copyNimNode(node)
-            )
+            # If no pre-defined hook, use the facet plan as a template.
+            if hookNode == nil:
+                swapIdent = facetPlan.realm
 
-            result.add(
-                quote do:
-                    `property`.hook = `hookNode`
-            )
+                for node in facetNodes[facetPlan.index]:
+                    if node.kind == nnkExprColonExpr and node[0].strVal == "call":
+                        hookNode = node[1]
+                    elif node.kind == nnkExprColonExpr and node[0].strVal == "swap":
+                        swapIdent = node[1].strVal
 
-    if currentPlan.class != Hook.TypeID:
+                if hookNode != nil:
+                    hookNode = talkTree(
+                        hookNode,
+                        proc(node: NimNode, ctx: NimNode): NimNode =
+                            if node.kind == nnkIdent and node.strVal == swapIdent:
+                                result = newIdentNode(currentPlan.realm)
+                            else:
+                                result = copyNimNode(node)
+                    )
+
+                    result.add(
+                        quote do:
+                            `property`.hook = `hookNode`
+                    )
+
+    if currentPlan.class notin [Hook.TypeID]: # Don't add certain configs
         result.add(
             quote do:
                 config.add(`property`)
         )
+
+
+
+
 
 macro shape*(scope: typedesc, body: untyped) =
     result = newStmtList()
