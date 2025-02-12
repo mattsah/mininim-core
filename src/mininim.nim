@@ -6,7 +6,11 @@ import
     std/marshal,
     std/sequtils,
     std/macrocache,
-    std/typetraits
+    std/typetraits,
+    std/strformat,
+    std/algorithm,
+    std/strutils
+
 
 export
     json,
@@ -15,7 +19,10 @@ export
     tables,
     marshal,
     sequtils,
-    typetraits
+    typetraits,
+    strformat,
+    algorithm,
+    strutils
 
 type
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
