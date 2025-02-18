@@ -82,7 +82,7 @@ proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. com
         for i, child in node:
             result.add(talkTree(child, call, node))
 
-converter typeID*(T:typedesc): TypeID =
+converter typeID*(T: typedesc): TypeID =
     const id = nextTypeID.value
 
     static:
@@ -264,10 +264,6 @@ macro resolve(property: untyped) =
             quote do:
                 config.add(`property`)
         )
-
-
-
-
 
 macro shape*(scope: typedesc, body: untyped) =
     result = newStmtList()
