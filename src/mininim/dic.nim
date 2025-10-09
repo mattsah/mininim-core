@@ -14,9 +14,8 @@ begin Delegate:
 shape Delegate: @[
     #[
         The call property of the `Hook` should effectively act as a template, parsed as NimNode
-        then modified such that any appearances of the Hook's target (Delegate in this case)
-        are replaced by the target when it is copied to teh `Delegate.hook` Facet for some other
-        class.
+        then modified such that any appearances of the Hook's `swap` target (Delegate in this case)
+        are replaced by the shaped class.
     ]#
     Hook(
         call: proc(app: App): Delegate =
