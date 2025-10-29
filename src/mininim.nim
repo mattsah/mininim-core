@@ -94,9 +94,16 @@ template static*() {. pragma .}
 template mutator*() {. pragma .}
 
 macro begin*(scope: typedesc, body: untyped) =
+    var
+        parent: string
+
     let
         target = scope.strVal
+
+    if scope.getImpl[2][0].len > 0:
         parent = scope.getImpl[2][0][1][0].strVal
+    else:
+        parent = "Class"
 
     for i1, c1 in body:
         if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
@@ -135,7 +142,7 @@ macro begin*(scope: typedesc, body: untyped) =
                                 while current.kind in [nnkCall, nnkDotExpr]:
                                     current = current[0]
 
-                                if current.strVal == "super":
+                                if current.kind == nnkIdent and current.strVal == "super":
                                     result = newNimNode(nnkCommand).add(
                                         newIdentNode("procCall"),
                                         talkTree(
