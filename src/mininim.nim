@@ -9,7 +9,8 @@ import
     std/typetraits,
     std/strformat,
     std/algorithm,
-    std/strutils
+    std/strutils,
+    std/options
 
 
 export
@@ -22,7 +23,8 @@ export
     typetraits,
     strformat,
     algorithm,
-    strutils
+    strutils,
+    options
 
 type
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
