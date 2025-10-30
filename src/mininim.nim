@@ -81,7 +81,7 @@ proc `%`*(p: pointer): JsonNode =
 proc `%`*(t: tuple): JsonNode =
   result = newJObject()
   for k, v in t.fieldPairs():
-    result[k] = %v
+    result[k] = % v
 
 proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
     result = call(node, ctx)
