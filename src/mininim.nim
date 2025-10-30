@@ -29,8 +29,8 @@ export
     locks
 
 type
-    TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
     InitHook* = proc(app: App): void {. nimcall .}
+    TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     TypeID* = uint16
 

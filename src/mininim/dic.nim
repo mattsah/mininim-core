@@ -4,7 +4,7 @@ import
 
 type
     Delegate* = ref object of Facet
-    DelegateHook*[T] = proc(app: App): T {. nimcall .}
+    DelegateHook*[T] = proc(app: App): T {. nimcall, gcsafe .}
 
     Shared* = ref object of Facet
 
