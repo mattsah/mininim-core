@@ -3,9 +3,34 @@ import
     std/tables
 
 type
-    Shared* = ref object of Facet
     Delegate* = ref object of Facet
     DelegateHook*[T] = proc(app: App): T {. nimcall .}
+
+    Shared* = ref object of Facet
+
+begin App:
+    proc init*
+
+    proc get*[T](target: typedesc[T]): T =
+        let
+            delegate = this.config.findOne(Delegate, (scope: target.TypeID))
+            shared = this.config.findOne(Shared, (scope: target.TypeID))
+
+        withLock this.store.lock:
+            if shared != nil and this.store.instances.hasKey(target.TypeID):
+                    result = cast[T](this.store.instances[target.TypeID])
+
+            else:
+                when defined(debug):
+                    echo fmt "Instantiating new instance of {$T}"
+
+                if delegate != nil:
+                    result = cast[DelegateHook[T]](delegate.hook)(this)
+                else:
+                    result = T.init()
+
+                if shared != nil:
+                    this.store.instances[target.TypeID] = cast[RootRef](result)
 
 begin Delegate:
     proc build(app: App): Delegate {. static .}=
@@ -23,21 +48,10 @@ shape Delegate: @[
     )
 ]
 
-begin App:
-    proc get*[T](target: typedesc[T]): T =
-        let
-            delegate = this.config.findOne(Delegate, (scope: target.TypeID))
-            shared = this.config.findOne(Shared, (scope: target.TypeID))
-
-        withLock this.store.lock:
-            if shared != nil and this.store.instances.hasKey(target.TypeID):
-                    result = cast[T](this.store.instances[target.TypeID])
-
-            else:
-                if delegate != nil:
-                    result = cast[DelegateHook[T]](delegate.hook)(this)
-                else:
-                    result = T.init()
-
-                if shared != nil:
-                    this.store.instances[target.TypeID] = cast[ref RootObj](result)
+shape Shared: @[
+    Hook(
+        init: true,
+        call: proc(app: App): void =
+            discard app.get(Shared)
+    )
+]

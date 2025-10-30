@@ -30,6 +30,7 @@ export
 
 type
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
+    InitHook* = proc(app: App): void {. nimcall .}
 
     TypeID* = uint16
 
@@ -52,6 +53,7 @@ type
         scope*: TypeID
 
     Hook* = ref object of Facet
+        init*: bool = false
         swap*: TypeID
         call*: pointer
 
@@ -94,6 +96,9 @@ converter typeID*(T: typedesc): TypeID =
     const id = nextTypeID.value
 
     static:
+        when defined(debug):
+            echo fmt "Registering {$T} with id {id}"
+
         inc nextTypeID
 
     result = id.TypeID
@@ -274,11 +279,10 @@ macro resolve(property: untyped) =
                             `property`.hook = `hookNode`
                     )
 
-    if currentPlan.class notin [Hook.TypeID]: # Don't add certain configs
-        result.add(
-            quote do:
-                config.add(`property`)
-        )
+    result.add(
+        quote do:
+            config.add(`property`)
+    )
 
 macro shape*(scope: typedesc, body: untyped) =
     result = newStmtList()
@@ -340,7 +344,7 @@ begin Facet:
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
 
-        if this.class != class.typeID:
+        if class.typeId != Facet.typeId and this.class != class.typeID:
             result = false
         else:
             let target = % cast[class](this)
@@ -377,3 +381,7 @@ begin App:
         this.config = config
 
         initLock(this.store.lock)
+
+        for hook in this.config.findAll(Hook, (init: true)):
+            for facet in this.config.findAll(Facet, (class: hook.scope)):
+                cast[InitHook](facet.hook)(this)
