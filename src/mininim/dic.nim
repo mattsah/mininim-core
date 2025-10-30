@@ -25,17 +25,19 @@ shape Delegate: @[
 
 begin App:
     proc get*[T](target: typedesc[T]): T =
-        let delegate = this.config.findOne(Delegate, (scope: target.TypeID))
-        let shared   = this.config.findOne(Shared, (scope: target.TypeID))
+        let
+            delegate = this.config.findOne(Delegate, (scope: target.TypeID))
+            shared = this.config.findOne(Shared, (scope: target.TypeID))
 
-        if shared != nil and this.store.hasKey(target.TypeID):
-            result = cast[T](this.store[target.TypeID])
+        withLock this.store.lock:
+            if shared != nil and this.store.instances.hasKey(target.TypeID):
+                    result = cast[T](this.store.instances[target.TypeID])
 
-        else:
-            if delegate != nil:
-                result = cast[DelegateHook[T]](delegate.hook)(this)
             else:
-                result = T.init()
+                if delegate != nil:
+                    result = cast[DelegateHook[T]](delegate.hook)(this)
+                else:
+                    result = T.init()
 
-            if shared != nil:
-                this.store[target.TypeID] = cast[pointer](result)
+                if shared != nil:
+                    this.store.instances[target.TypeID] = cast[ref RootObj](result)

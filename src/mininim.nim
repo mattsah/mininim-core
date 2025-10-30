@@ -10,7 +10,8 @@ import
     std/strformat,
     std/algorithm,
     std/strutils,
-    std/options
+    std/options,
+    std/locks
 
 
 export
@@ -24,7 +25,8 @@ export
     strformat,
     algorithm,
     strutils,
-    options
+    options,
+    locks
 
 type
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
@@ -33,9 +35,13 @@ type
 
     Class* {. inheritable .} = ref object
 
+    Storage* = object
+        instances*: Table[TypeId, ref RootObj]
+        lock*: Lock
+
     App* = ref object of Class
         config*: Config
-        store*: Table[TypeID, pointer]
+        store*: Storage
 
     Config* = ref object of Class
         data*: seq[Facet]
@@ -369,3 +375,5 @@ begin Config:
 begin App:
     method init*(config: Config): void {. base, mutator .}=
         this.config = config
+
+        initLock(this.store.lock)
