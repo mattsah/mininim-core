@@ -48,12 +48,11 @@ type
         data*: seq[Facet]
 
     Facet* = ref object of Class
-        hook*: pointer
+        call*: pointer
         class*: TypeID
         scope*: TypeID
 
     Hook* = ref object of Facet
-        base*: TypeID
         init*: bool = false
 
     Plan* = tuple[
@@ -64,11 +63,11 @@ type
     ]
 
 const
-    facetNodes = CacheSeq("mininim.facets")
     nextTypeID = CacheCounter("mininim.types")
 
 var
-    facetPlans* {. compileTime .} = newSeq[Plan]()
+    facetPlans {. compileTime .} = newSeq[Plan]()
+    facetNodes {. compileTime .} = newSeq[NimNode]()
 
 let
     config* = Config()
@@ -230,55 +229,74 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
                 var this = system.new(`self`)
                 this.init()
                 this
-
+#[
+    Responsible for resolving facetNodes and adding them to the config.
+]#
 macro resolve(property: untyped): untyped =
     result = newStmtList()
     let currentPlan = facetPlans[high facetPlans]
 
+    var
+        callNode: NimNode = nil
+
+    # Check if current facet has a call and remove corresponding node from property and store
+
+    for i, node in facetNodes[currentPlan.index]:
+        if node.kind == nnkExprColonExpr and node[0].strVal == "call":
+            callNode = node[1]
+            property.del(i)
+
     for facetPlan in facetPlans:
+        #[
+            Ignore facet plans not relevant to the current class.
+
+            For example, if we're currently trying to resolve a Delegate() we want to find facets
+            on the shape of Delegate only.  We can then examine the facetPlan class to determine
+            the type of facet and transform the current Delegate().  This effectively allows
+            facets to be added to facets to change their behavior.
+        ]#
         if currentPlan.class != facetPlan.scope:
             continue
 
         #[
-            Handle hooks
+            If current plan is shaped by a Hook, copy the call if necessary
         ]#
-        if facetPlan.class == Hook:
-            var
-                hookBase: string = currentPlan.realm
-                hookNode: NimNode = nil
+        if facetPlan.class == Hook and callNode == nil:
+            for node in facetNodes[facetPlan.index]:
+                if node.kind == nnkExprColonExpr and node[0].strVal == "call":
+                    callNode = node[1]
 
-            block scan:
-                for hookPlan in [currentPlan, facetPlan]:
-                    for node in facetNodes[hookPlan.index]:
-                        if currentPlan.class == Hook:
-                            if node.kind == nnkExprColonExpr and node[0].strVal == "base":
-                               hookBase = node[1].strVal
+                    facetNodes[currentPlan.index].insert(1, newColonExpr(
+                        newIdentNode("call"),
+                        copyNimNode(callNode)
+                    ))
 
-                        if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
-                            hookNode = node[1]
-                            break scan
+    # Add the call node back for non-Hook classes
 
-            for i, node in property:
-                if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
-                    property.del(i)
-
-            property.insert(1, newColonExpr(
-                newIdentNode("hook"),
-                talkTree(
-                    hookNode,
-                    proc(node: NimNode, ctx: NimNode): NimNode =
-                        if node.kind == nnkIdent and node.strVal == "self":
-                            result = newIdentNode(hookBase)
-                        else:
-                            result = copyNimNode(node)
-                )
-            ))
+    if callNode != nil and currentPlan.class != Hook:
+        property.insert(1, newColonExpr(
+            newIdentNode("call"),
+            talkTree(
+                callNode,
+                proc(node: NimNode, ctx: NimNode): NimNode =
+                    if node.kind == nnkIdent and node.strVal == "self":
+                        result = newIdentNode(currentPlan.realm)
+                    else:
+                        result = copyNimNode(node)
+            )
+        ))
 
     result.add(
         quote do:
             config.add(`property`)
     )
 
+#[
+    The shape macro is responsible for compile time aggegation of facet information which adds
+    meta-information about each facet to facetPlans and a NimNode representation of the facet
+    to facetNodes.  Once added, the node representations can be transformed and are added to
+    the global config via resolve()
+]#
 macro shape*(scope: typedesc, body: untyped): untyped =
     result = newStmtList()
 
@@ -321,10 +339,10 @@ macro shape*(scope: typedesc, body: untyped): untyped =
                 quote do:
                     static:
                         facetPlans.add((
-                            realm: $`scope`,
-                            scope: `scope`.TypeID,
-                            class: `class`.TypeID,
-                            index: `facetNodeIndex`
+                            realm: $`scope`,            # The class name for which the facet was added
+                            scope: `scope`.TypeID,      # The class id for which the facet was added
+                            class: `class`.TypeID,      # The class of the facet itself (e.g. Middleware)
+                            index: `facetNodeIndex`     # The location of the facet's NimNode in facetNodes
                         ))
 
                     resolve(`facet`)
@@ -377,11 +395,4 @@ begin App:
 
         for hook in this.config.findAll(Hook, (init: true)):
             for facet in this.config.findAll(Facet, (class: hook.scope)):
-                cast[InitHook](facet.hook)(this)
-
-shape Hook: @[
-    Hook(
-        hook: proc(): void =
-            discard
-    )
-]
+                cast[InitHook](facet.call)(this)

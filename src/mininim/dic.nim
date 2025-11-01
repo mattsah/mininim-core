@@ -25,7 +25,7 @@ begin App:
                     echo fmt "Instantiating new instance of {$T}"
 
                 if delegate != nil:
-                    result = cast[DelegateHook[T]](delegate.hook)(this)
+                    result = cast[DelegateHook[T]](delegate.call)(this)
                 else:
                     result = T.init()
 
@@ -43,7 +43,7 @@ shape Delegate: @[
         are replaced by the shaped class.
     ]#
     Hook(
-        hook: proc(app: App): self =
+        call: proc(app: App): self =
             result = self.build(app)
     )
 ]
@@ -51,7 +51,7 @@ shape Delegate: @[
 shape Shared: @[
     Hook(
         init: true,
-        hook: proc(app: App): void =
+        call: proc(app: App): void =
             discard app.get(self)
     )
 ]
