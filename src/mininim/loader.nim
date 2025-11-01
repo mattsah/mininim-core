@@ -16,6 +16,11 @@ export
 macro scan*(folder: static[string], ext: static[string] = ".nim") =
     result = newStmtList()
 
+    result.add(
+        quote do:
+            {. warning[UnusedImport]:off .}
+    )
+
     for file in os.walkDirRec(folder, checkDir=true):
         if file.endsWith(ext):
             result.add(nnkImportStmt.newTree(newIdentNode(file[0 ..< ^ext.len])))
