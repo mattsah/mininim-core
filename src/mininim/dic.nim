@@ -33,8 +33,8 @@ begin App:
                     this.store.instances[target.TypeID] = cast[RootRef](result)
 
 begin Delegate:
-    proc build(app: App): Delegate {. static .}=
-        discard
+    proc build(app: App): self {. static .}=
+        result = self.init()
 
 shape Delegate: @[
     #[
@@ -43,15 +43,15 @@ shape Delegate: @[
         are replaced by the shaped class.
     ]#
     Hook(
-        call: proc(app: App): Delegate =
-            result = Delegate.build(app)
+        hook: proc(app: App): self =
+            result = self.build(app)
     )
 ]
 
 shape Shared: @[
     Hook(
         init: true,
-        call: proc(app: App): void =
-            discard app.get(Shared)
+        hook: proc(app: App): void =
+            discard app.get(self)
     )
 ]

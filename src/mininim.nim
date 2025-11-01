@@ -53,14 +53,13 @@ type
         scope*: TypeID
 
     Hook* = ref object of Facet
+        base*: TypeID
         init*: bool = false
-        swap*: TypeID
-        call*: pointer
 
     Plan* = tuple[
         realm: string,
-        class: TypeID,
         scope: TypeID,
+        class: TypeID,
         index: int
     ]
 
@@ -232,9 +231,8 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
                 this.init()
                 this
 
-macro resolve(property: untyped) =
+macro resolve(property: untyped): untyped =
     result = newStmtList()
-
     let currentPlan = facetPlans[high facetPlans]
 
     for facetPlan in facetPlans:
@@ -244,47 +242,44 @@ macro resolve(property: untyped) =
         #[
             Handle hooks
         ]#
-        if facetPlan.class == Hook.TypeID:
+        if facetPlan.class == Hook:
             var
+                hookBase: string = currentPlan.realm
                 hookNode: NimNode = nil
-                swapIdent: string
 
-            # Look to see if we have a pre-defined hook
-            for node in facetNodes[currentPlan.index]:
+            block scan:
+                for hookPlan in [currentPlan, facetPlan]:
+                    for node in facetNodes[hookPlan.index]:
+                        if currentPlan.class == Hook:
+                            if node.kind == nnkExprColonExpr and node[0].strVal == "base":
+                               hookBase = node[1].strVal
+
+                        if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
+                            hookNode = node[1]
+                            break scan
+
+            for i, node in property:
                 if node.kind == nnkExprColonExpr and node[0].strVal == "hook":
-                    hookNode = node[1]
+                    property.del(i)
 
-            # If no pre-defined hook, use the facet plan as a template.
-            if hookNode == nil:
-                swapIdent = facetPlan.realm
-
-                for node in facetNodes[facetPlan.index]:
-                    if node.kind == nnkExprColonExpr and node[0].strVal == "call":
-                        hookNode = node[1]
-                    elif node.kind == nnkExprColonExpr and node[0].strVal == "swap":
-                        swapIdent = node[1].strVal
-
-                if hookNode != nil:
-                    hookNode = talkTree(
-                        hookNode,
-                        proc(node: NimNode, ctx: NimNode): NimNode =
-                            if node.kind == nnkIdent and node.strVal == swapIdent:
-                                result = newIdentNode(currentPlan.realm)
-                            else:
-                                result = copyNimNode(node)
-                    )
-
-                    result.add(
-                        quote do:
-                            `property`.hook = `hookNode`
-                    )
+            property.insert(1, newColonExpr(
+                newIdentNode("hook"),
+                talkTree(
+                    hookNode,
+                    proc(node: NimNode, ctx: NimNode): NimNode =
+                        if node.kind == nnkIdent and node.strVal == "self":
+                            result = newIdentNode(hookBase)
+                        else:
+                            result = copyNimNode(node)
+                )
+            ))
 
     result.add(
         quote do:
             config.add(`property`)
     )
 
-macro shape*(scope: typedesc, body: untyped) =
+macro shape*(scope: typedesc, body: untyped): untyped =
     result = newStmtList()
 
     var copy = copyNimTree(body)
@@ -327,14 +322,12 @@ macro shape*(scope: typedesc, body: untyped) =
                     static:
                         facetPlans.add((
                             realm: $`scope`,
-                            class: `class`.TypeID,
                             scope: `scope`.TypeID,
+                            class: `class`.TypeID,
                             index: `facetNodeIndex`
                         ))
 
-                    var facet = `facet`
-
-                    resolve(facet)
+                    resolve(`facet`)
             )
 
     when defined(debug):
@@ -344,7 +337,7 @@ begin Facet:
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
 
-        if class.typeId != Facet.typeId and this.class != class.typeID:
+        if class.typeId != Facet.typeId and this.class != class.typeId: #class.typeId notin [Facet.typeId, this.class]:
             result = false
         else:
             let target = % cast[class](this)
@@ -385,3 +378,10 @@ begin App:
         for hook in this.config.findAll(Hook, (init: true)):
             for facet in this.config.findAll(Facet, (class: hook.scope)):
                 cast[InitHook](facet.hook)(this)
+
+shape Hook: @[
+    Hook(
+        hook: proc(): void =
+            discard
+    )
+]
