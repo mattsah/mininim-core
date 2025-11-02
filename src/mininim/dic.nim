@@ -25,7 +25,7 @@ begin App:
                     echo fmt "Instantiating new instance of {$T}"
 
                 if delegate != nil:
-                    result = cast[DelegateHook[T]](delegate.call)(this)
+                    result = delegate[DelegateHook[T]](this)
                 else:
                     result = T.init()
 

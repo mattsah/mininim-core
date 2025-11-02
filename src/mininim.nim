@@ -29,7 +29,7 @@ export
     locks
 
 type
-    InitHook* = proc(app: App): void {. nimcall .}
+    InitHook = proc(app: App): void {. nimcall .}
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     TypeID* = uint16
@@ -48,7 +48,8 @@ type
         data*: seq[Facet]
 
     Facet* = ref object of Class
-        call*: pointer
+        app: App
+        call: pointer
         class*: TypeID
         scope*: TypeID
 
@@ -75,8 +76,11 @@ let
 proc init*(this: auto) =
     discard
 
+proc `%`*(p: App): JsonNode =
+    result = newJInt(cast[int](addr p))
+
 proc `%`*(p: pointer): JsonNode =
-    result = JsonNode()
+    result = newJInt(cast[int](p))
 
 proc `%`*(t: tuple): JsonNode =
   result = newJObject()
@@ -234,7 +238,9 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
 ]#
 macro resolve(property: untyped): untyped =
     result = newStmtList()
-    let currentPlan = facetPlans[high facetPlans]
+
+    let
+        currentPlan = facetPlans[high facetPlans]
 
     var
         callNode: NimNode = nil
@@ -268,7 +274,7 @@ macro resolve(property: untyped): untyped =
 
                     facetNodes[currentPlan.index].insert(1, newColonExpr(
                         newIdentNode("call"),
-                        copyNimNode(callNode)
+                        copyNimTree(callNode)
                     ))
 
     # Add the call node back for non-Hook classes
@@ -279,10 +285,10 @@ macro resolve(property: untyped): untyped =
             talkTree(
                 callNode,
                 proc(node: NimNode, ctx: NimNode): NimNode =
+                    result = copyNimNode(node)
+
                     if node.kind == nnkIdent and node.strVal == "self":
                         result = newIdentNode(currentPlan.realm)
-                    else:
-                        result = copyNimNode(node)
             )
         ))
 
@@ -352,6 +358,9 @@ macro shape*(scope: typedesc, body: untyped): untyped =
         echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"
 
 begin Facet:
+    proc `[]`*(T: typedesc): T =
+        result = cast[T](this.call)
+
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
 
@@ -389,9 +398,12 @@ begin Config:
 
 begin App:
     method init*(config: Config): void {. base, mutator .}=
-        this.config = config
+        this.config = config.deepCopy
 
         initLock(this.store.lock)
+
+        for facet in this.config.data:
+            facet.app = this
 
         for hook in this.config.findAll(Hook, (init: true)):
             for facet in this.config.findAll(Facet, (class: hook.scope)):
