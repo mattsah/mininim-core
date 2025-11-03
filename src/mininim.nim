@@ -23,6 +23,7 @@ export
     tables,
     marshal,
     sequtils,
+    macrocache,
     typetraits,
     strformat,
     algorithm,
@@ -284,16 +285,17 @@ macro begin*(scope: typedesc, body: untyped) =
                         discard
                 )
 
-    if target notin typeIndex:
-        typeIndex[target] = scope
+    body.insert(
+        0,
+        quote do:
+            when currentSourcePath & '.' & `target` notin typeIndex:
+                static:
+                    typeIndex[currentSourcePath & '.' & `target`] = quote do:
+                        ()
 
-        body.insert(
-            0,
-            quote do:
                 proc type*(this: `scope`): TypeID =
                     result = `scope`.typeID
-        )
-
+    )
 
     result = body
 
