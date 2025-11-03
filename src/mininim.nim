@@ -12,7 +12,8 @@ import
     std/algorithm,
     std/strutils,
     std/options,
-    std/locks
+    std/locks,
+    std/os
 
 
 export
@@ -28,7 +29,8 @@ export
     algorithm,
     strutils,
     options,
-    locks
+    locks,
+    os
 
 type
     TypeID* = uint16

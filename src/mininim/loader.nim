@@ -1,9 +1,6 @@
 {. warning[UnusedImport]:off .}
 
 import
-    std/os,
-    std/macros,
-    std/strutils,
     mininim
 
 export
