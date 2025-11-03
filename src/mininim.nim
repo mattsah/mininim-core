@@ -95,6 +95,9 @@ proc `%`*(t: tuple): JsonNode =
   for k, v in t.fieldPairs():
     result[k] = % v
 
+proc type*(self: typedesc): TypeID =
+    result = self.typeID
+
 proc trap*[V](self: typedesc, value: V): TypedPointer =
     var
         head: pointer
@@ -282,9 +285,6 @@ macro begin*(scope: typedesc, body: untyped) =
     body.insert(
         0,
         quote do:
-            proc type*(self: typedesc[`scope`]): TypeID =
-                result = `scope`.typeID
-
             proc type*(this: `scope`): TypeID =
                 result = `scope`.typeID
     )
