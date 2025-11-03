@@ -4,7 +4,7 @@ import
 
 type
     Delegate* = ref object of Facet
-    DelegateHook*[T] = proc(app: App): T {. nimcall, gcsafe .}
+    DelegateHook*[T] = proc(): T {. closure .}
 
     Shared* = ref object of Facet
 
@@ -21,16 +21,16 @@ begin App:
                     result = cast[T](this.store.instances[target.TypeID])
 
             else:
-                when defined(debug):
-                    echo fmt "Instantiating new instance of {$T}"
-
                 if delegate != nil:
-                    result = delegate[DelegateHook[T]](this)
+                    result = DelegateHook[T].value(delegate.call)()
                 else:
                     result = T.init()
 
                 if shared != nil:
                     this.store.instances[target.TypeID] = cast[RootRef](result)
+
+                when defined(debug):
+                    echo fmt "created[{align($T.typeID, 3, '0')}]: new instance of '{$T}'"
 
 begin Delegate:
     proc build(app: App): self {. static .}=
@@ -43,15 +43,15 @@ shape Delegate: @[
         are replaced by the shaped class.
     ]#
     Hook(
-        call: proc(app: App): self =
-            result = self.build(app)
+        call: proc(): self {. closure .}=
+            result = self.build(this.app)
     )
 ]
 
 shape Shared: @[
     Hook(
         init: true,
-        call: proc(app: App): void =
-            discard app.get(self)
+        call: proc(): void {. closure .} =
+            discard this.app.get(self)
     )
 ]

@@ -1,4 +1,5 @@
 import
+    std/sets,
     std/json,
     std/sugar,
     std/macros,
@@ -15,6 +16,7 @@ import
 
 
 export
+    sets,
     json,
     sugar,
     macros,
@@ -29,12 +31,19 @@ export
     locks
 
 type
-    InitHook = proc(app: App): void {. nimcall .}
-    TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
-
     TypeID* = uint16
 
     Class* {. inheritable .} = ref object
+    Closure* = distinct auto
+
+    TypedPointer* = ref object
+        data: pointer
+        name: string
+        size: int
+
+    InitHook = proc(): void {. closure, gcsafe .}
+    TrapHook = proc(this: Facet): TypedPointer {. nimcall .}
+    TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     Storage* = object
         instances*: Table[TypeId, ref RootObj]
@@ -48,10 +57,10 @@ type
         data*: seq[Facet]
 
     Facet* = ref object of Class
-        app: App
-        call: pointer
+        app*: App
         class*: TypeID
         scope*: TypeID
+        call: TypedPointer
 
     Hook* = ref object of Facet
         init*: bool = false
@@ -69,7 +78,6 @@ const
 var
     facetPlans {. compileTime .} = newSeq[Plan]()
     facetNodes {. compileTime .} = newSeq[NimNode]()
-
 let
     config* = Config()
 
@@ -86,6 +94,59 @@ proc `%`*(t: tuple): JsonNode =
   result = newJObject()
   for k, v in t.fieldPairs():
     result[k] = % v
+
+proc trap*[V](self: typedesc, value: V): TypedPointer =
+    var
+        head: pointer
+
+    let
+        name = name(V)
+        size = sizeof(V)
+
+    when V is not ref:
+        head = alloc(size)
+
+        copyMem(head, unsafeAddr value, size)
+
+    else:
+        head = addr value
+
+    result = TypedPointer(
+        data: head,
+        name: name,
+        size: size,
+    )
+
+    when defined(debug):
+        echo fmt "trapped[{align($result.size, 3, '0')}]: {result.name} @ {$cast[int](result.data)}"
+
+proc get*(self: typedesc, this: TypedPointer): ptr self {. gcsafe .} =
+#    if $T != this.name:
+#        raise newException(CatchableError, "Type mismatch: expected one of " & this.name & ", got " & $T)
+#    if this.kind != Closure and sizeof(T) != this.size:
+#        raise newException(CatchableError, "Size mismatch: expected " & $this.size & ", got " & $sizeof(T))
+
+    # Handle cloosure
+
+    result = cast[ptr self](this.data)
+
+proc value*(self: typedesc, this: TypedPointer): self {. gcsafe .}=
+    let
+        p = self.get(this)
+
+    when defined(debug):
+        if p == nil:
+            echo fmt "missing[{align($this.size, 3, '0')}]: {this.name} @ {$cast[int](this.data)}"
+
+    when self is proc and sizeof(self) > sizeof(int):
+        result = default(self)
+
+        copyMem(addr result, p, sizeof(self))
+
+    result = cast[self](p[])
+
+    when defined(debug):
+        echo fmt "secured[{align($this.size, 3, '0')}]: {this.name} @ {$cast[int](this.data)}"
 
 proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
     result = call(node, ctx)
@@ -236,7 +297,7 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
 #[
     Responsible for resolving facetNodes and adding them to the config.
 ]#
-macro resolve(property: untyped): untyped =
+macro resolve(facet: untyped): untyped =
     result = newStmtList()
 
     let
@@ -250,7 +311,7 @@ macro resolve(property: untyped): untyped =
     for i, node in facetNodes[currentPlan.index]:
         if node.kind == nnkExprColonExpr and node[0].strVal == "call":
             callNode = node[1]
-            property.del(i)
+            facet.del(i)
 
     for facetPlan in facetPlans:
         #[
@@ -280,22 +341,32 @@ macro resolve(property: untyped): untyped =
     # Add the call node back for non-Hook classes
 
     if callNode != nil and currentPlan.class != Hook:
-        property.insert(1, newColonExpr(
-            newIdentNode("call"),
-            talkTree(
+        let
+            this = newIdentNode("this")
+            call = talkTree(
                 callNode,
                 proc(node: NimNode, ctx: NimNode): NimNode =
-                    result = copyNimNode(node)
-
                     if node.kind == nnkIdent and node.strVal == "self":
                         result = newIdentNode(currentPlan.realm)
+                    else:
+                        result = copyNimNode(node)
             )
+
+        facet.insert(1, newColonExpr(
+            newIdentNode("call"),
+            quote do:
+                TrapHook.trap(
+                    proc(`this`: Facet): TypedPointer =
+                        result = Closure.trap(`call`)
+                )
         ))
 
     result.add(
         quote do:
-            config.add(`property`)
+            config.add(`facet`)
     )
+
+    echo facet.repr
 
 #[
     The shape macro is responsible for compile time aggegation of facet information which adds
@@ -359,12 +430,13 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 
 begin Facet:
     proc `[]`*(T: typedesc): T =
-        result = cast[T](this.call)
+        result = T.value(this.call)
+#        if defined this.call:
 
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
 
-        if class.typeId != Facet.typeId and this.class != class.typeId: #class.typeId notin [Facet.typeId, this.class]:
+        if class.typeId notin [Facet.typeId, this.class]:
             result = false
         else:
             let target = % cast[class](this)
@@ -405,6 +477,10 @@ begin App:
         for facet in this.config.data:
             facet.app = this
 
+            if facet.call != nil:
+                facet.call = TrapHook.value(facet.call)(facet)
+
         for hook in this.config.findAll(Hook, (init: true)):
             for facet in this.config.findAll(Facet, (class: hook.scope)):
-                cast[InitHook](facet.call)(this)
+                echo fmt "loading[{align($facet.class, 3, '0')}]: on facet scope {$facet.scope}"
+                InitHook.value(facet.call)()
