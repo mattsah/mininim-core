@@ -61,7 +61,7 @@ type
         app*: App
         class*: TypeID
         scope*: TypeID
-        call: TypedPointer
+        call*: TypedPointer
 
     Hook* = ref object of Facet
         init*: bool = false
@@ -74,7 +74,8 @@ type
     ]
 
 const
-    nextTypeID = CacheCounter("mininim.types")
+    nextTypeID = CacheCounter("mininim.typeCounter")
+    typeIndex = CacheTable("mininim.typeIndex")
 
 var
     facetPlans {. compileTime .} = newSeq[Plan]()
@@ -283,12 +284,16 @@ macro begin*(scope: typedesc, body: untyped) =
                         discard
                 )
 
-    body.insert(
-        0,
-        quote do:
-            proc type*(this: `scope`): TypeID =
-                result = `scope`.typeID
-    )
+    if target notin typeIndex:
+        typeIndex[target] = scope
+
+        body.insert(
+            0,
+            quote do:
+                proc type*(this: `scope`): TypeID =
+                    result = `scope`.typeID
+        )
+
 
     result = body
 

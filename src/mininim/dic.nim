@@ -3,10 +3,44 @@ import
     std/tables
 
 type
+    Shared* = ref object of Facet
+
+    Builder* = ref object of Facet
+
     Delegate* = ref object of Facet
     DelegateHook*[T] = proc(): T {. closure .}
 
-    Shared* = ref object of Facet
+begin Shared:
+    discard
+
+shape Shared: @[
+    Hook(
+        init: true,
+        call: proc(): void {. closure .} =
+            discard this.app.get(shape)
+    )
+]
+
+#[
+    Can be extended to provide basic buld functionality
+]#
+begin Builder:
+    proc build(app: App): self {. static .}=
+        result = self.init()
+
+shape Builder: @[
+
+]
+
+begin Delegate:
+    discard
+
+shape Delegate: @[
+    Hook(
+        call: proc(): shape {. closure .}=
+            result = shape.build(this.app)
+    )
+]
 
 begin App:
     proc init*
@@ -32,26 +66,9 @@ begin App:
                 when defined(debug):
                     echo fmt "created[{align($T.typeID, 3, '0')}]: new instance of '{$T}'"
 
-begin Delegate:
-    proc build(app: App): self {. static .}=
-        result = self.init()
+    proc build*(app: App = nil): self {. static .} =
+        return self.init(config)
 
-shape Delegate: @[
-    #[
-        The call property of the `Hook` should effectively act as a template, parsed as NimNode
-        then modified such that any appearances of the Hook's `swap` target (Delegate in this case)
-        are replaced by the shaped class.
-    ]#
-    Hook(
-        call: proc(): shape {. closure .}=
-            result = shape.build(this.app)
-    )
-]
-
-shape Shared: @[
-    Hook(
-        init: true,
-        call: proc(): void {. closure .} =
-            discard this.app.get(shape)
-    )
+shape App: @[
+    Delegate()
 ]
