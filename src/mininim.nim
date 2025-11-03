@@ -176,6 +176,8 @@ macro begin*(scope: typedesc, body: untyped) =
     let
         target = scope.strVal
 
+    echo scope.kind
+
     if scope.getImpl[2][0].len > 0:
         parent = scope.getImpl[2][0][1][0].strVal
     else:
@@ -301,7 +303,8 @@ macro resolve(facet: untyped): untyped =
     result = newStmtList()
 
     let
-        currentPlan = facetPlans[high facetPlans]
+        currentPlan  = facetPlans[high facetPlans]
+        currentClass = facet[0].strVal
 
     var
         callNode: NimNode = nil
@@ -346,10 +349,14 @@ macro resolve(facet: untyped): untyped =
             call = talkTree(
                 callNode,
                 proc(node: NimNode, ctx: NimNode): NimNode =
-                    if node.kind == nnkIdent and node.strVal == "self":
-                        result = newIdentNode(currentPlan.realm)
-                    else:
-                        result = copyNimNode(node)
+                    result = copyNimNode(node)
+
+                    if node.kind == nnkIdent:
+                        case node.strVal:
+                            of "self":
+                                result = newIdentNode(currentClass)
+                            of "shape":
+                                result = newIdentNode(currentPlan.realm)
             )
 
         facet.insert(1, newColonExpr(

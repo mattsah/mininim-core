@@ -43,8 +43,8 @@ shape Delegate: @[
         are replaced by the shaped class.
     ]#
     Hook(
-        call: proc(): self {. closure .}=
-            result = self.build(this.app)
+        call: proc(): shape {. closure .}=
+            result = shape.build(this.app)
     )
 ]
 
@@ -52,6 +52,6 @@ shape Shared: @[
     Hook(
         init: true,
         call: proc(): void {. closure .} =
-            discard this.app.get(self)
+            discard this.app.get(shape)
     )
 ]
