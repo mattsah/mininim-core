@@ -27,6 +27,6 @@ macro scan*(folder: static[string], ext: static[string] = ".nim") =
 
     result.add(quote do:
         when defined(debug):
-            echo "Total facets loaded: ", config.len
+            echo fmt "message[{align($config.len, 3, '0')}]: total facets loaded"
     )
 

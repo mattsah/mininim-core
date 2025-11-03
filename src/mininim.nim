@@ -176,9 +176,7 @@ macro begin*(scope: typedesc, body: untyped) =
     let
         target = scope.strVal
 
-    echo scope.kind
-
-    if scope.getImpl[2][0].len > 0:
+    if scope.getImpl[2][0].len > 0 and scope.getImpl[2][0][1].len > 0:
         parent = scope.getImpl[2][0][1][0].strVal
     else:
         parent = "Class"
@@ -281,7 +279,19 @@ macro begin*(scope: typedesc, body: untyped) =
                         discard
                 )
 
+    body.insert(
+        0,
+        quote do:
+            proc type*(self: typedesc[`scope`]): TypeID =
+                result = `scope`.typeID
+
+            proc type*(this: `scope`): TypeID =
+                result = `scope`.typeID
+    )
+
     result = body
+
+
 
 macro init*(self: typedesc, args: varargs[untyped]): untyped =
     if args.len > 0:
@@ -372,8 +382,6 @@ macro resolve(facet: untyped): untyped =
         quote do:
             config.add(`facet`)
     )
-
-    echo facet.repr
 
 #[
     The shape macro is responsible for compile time aggegation of facet information which adds
