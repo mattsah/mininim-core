@@ -77,6 +77,7 @@ type
 const
     nextTypeID = CacheCounter("mininim.typeCounter")
     typeIndex = CacheTable("mininim.typeIndex")
+    typeCode = CacheTable("mininim.typeCode")
 
 var
     facetPlans {. compileTime .} = newSeq[Plan]()
@@ -175,11 +176,15 @@ converter typeID*(T: typedesc): TypeID =
 template static*() {. pragma .}
 template mutator*() {. pragma .}
 
+macro clone*(body: untyped) =
+    result = body
+
 macro begin*(scope: typedesc, body: untyped) =
     var
         parent: string
 
     let
+        original = copyNimTree(body)
         target = scope.strVal
 
     if scope.getImpl[2][0].len > 0 and scope.getImpl[2][0][1].len > 0:
@@ -288,18 +293,25 @@ macro begin*(scope: typedesc, body: untyped) =
     body.insert(
         0,
         quote do:
-            when currentSourcePath & '.' & `target` notin typeIndex:
+            when $(`scope`.type) notin typeIndex:
                 static:
-                    typeIndex[currentSourcePath & '.' & `target`] = quote do:
+                    typeIndex[$(`scope`.type)] = quote do:
                         ()
 
                 proc type*(this: `scope`): TypeID =
                     result = `scope`.typeID
     )
 
+    body.insert(
+        0,
+        quote do:
+            when (currentSourcePath() & '.' & `target`) notin typeCode:
+                static:
+                    typeCode[currentSourcePath() & '.' & `target`] = newStmtList() # TODO:
+    )
+
+
     result = body
-
-
 
 macro init*(self: typedesc, args: varargs[untyped]): untyped =
     if args.len > 0:
