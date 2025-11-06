@@ -25,7 +25,6 @@ shape Shared: @[
     Can be extended to provide basic buld functionality
 ]#
 begin Builder:
-
     proc build(app: App): self {. static .}=
         result = self.init()
 

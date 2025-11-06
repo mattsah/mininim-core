@@ -175,6 +175,7 @@ converter typeID*(T: typedesc): TypeID =
 
 template static*() {. pragma .}
 template mutator*() {. pragma .}
+template abstract*() {. pragma .}
 
 macro clone*(body: untyped) =
     result = body
@@ -236,6 +237,7 @@ macro begin*(scope: typedesc, body: untyped) =
 
                 if c2.kind == nnkStmtList:
                     abs = false
+
                     var
                         transform: TreeCall
 
