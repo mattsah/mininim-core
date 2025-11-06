@@ -197,8 +197,8 @@ macro begin*(scope: typedesc, body: untyped) =
         if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
             var
                 stc = false
+                abs = false
                 cpy = true
-                abs = true
 
             if c1[4].kind == nnkPragma:
                 for i2, c2 in c1[4]:
@@ -207,6 +207,8 @@ macro begin*(scope: typedesc, body: untyped) =
                             stc = true
                         if c2.strVal == "mutator":
                             cpy = false
+                        if c2.strVal == "abstract":
+                            abs = true
 
             for i2, c2 in c1:
                 if c2.kind == nnkFormalParams:
@@ -236,8 +238,6 @@ macro begin*(scope: typedesc, body: untyped) =
                     c2[1].add(newEmptyNode())
 
                 if c2.kind == nnkStmtList:
-                    abs = false
-
                     var
                         transform: TreeCall
 

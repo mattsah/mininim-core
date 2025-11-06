@@ -43,8 +43,6 @@ shape Delegate: @[
 ]
 
 begin App:
-    proc init*
-
     proc get*[T](target: typedesc[T]): T =
         let
             delegate = this.config.findOne(Delegate, (scope: target.TypeID))
