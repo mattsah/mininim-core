@@ -342,7 +342,8 @@ macro begin*(scope: typedesc, body: untyped) =
         quote do:
             when (currentSourcePath() & '.' & `target`) notin typeCode:
                 static:
-                    typeCode[currentSourcePath() & '.' & `target`] = newStmtList() # TODO:
+                    # TODO: Actually figure out how to cache this
+                    typeCode[currentSourcePath() & '.' & `target`] = newStmtList()
     )
 
     result = body
