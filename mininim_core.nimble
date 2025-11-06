@@ -1,5 +1,6 @@
 # Package
 
+version       = ""
 author        = "Matthew J. Sahagian"
 description   = "Core support library for Mininim applications"
 license       = "MIT"
