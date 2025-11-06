@@ -180,8 +180,6 @@ macro clone*(body: untyped) =
     result = body
 
 macro begin*(scope: typedesc, body: untyped) =
-    mixin fmt
-
     var
         parent: string
 
@@ -446,10 +444,9 @@ macro resolve(facet: untyped): untyped =
 macro shape*(scope: typedesc, body: untyped): untyped =
     result = newStmtList()
 
-    mixin begin
-
-    var copy = copyNimTree(body)
-    var count = 0
+    var
+        copy = copyNimTree(body)
+        count = 0
 
     #
     # Begin looping over each facet
