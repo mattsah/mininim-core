@@ -180,12 +180,14 @@ macro clone*(body: untyped) =
     result = body
 
 macro begin*(scope: typedesc, body: untyped) =
+    mixin fmt
+
     var
         parent: string
 
     let
-        original = copyNimTree(body)
         target = scope.strVal
+        entry = copyNimTree(body)
 
     if scope.getImpl[2][0].len > 0 and scope.getImpl[2][0][1].len > 0:
         parent = scope.getImpl[2][0][1][0].strVal
@@ -194,75 +196,27 @@ macro begin*(scope: typedesc, body: untyped) =
 
     for i1, c1 in body:
         if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
-            var stc = false
-            var cpy = true
-            var abs = true
+            var
+                stc = false
+                cpy = true
+                abs = true
 
-            for i2, c2 in c1:
-                if c2.kind == nnkPragma:
-                    for i3, c3 in c2:
-                        if c3.kind == nnkIdent:
-                            if c3.strVal == "static":
-                                stc = true
-                            if c3.strVal == "mutator":
-                                cpy = false
-
-                elif c2.kind == nnkFormalParams:
-                    if c2[0].kind == nnkIdent:
-                        if c2[0].strVal == "self":
-                            c2[0] = newIdentNode(target)
-
-                    c2.insert(1, newNimNode(nnkIdentDefs))
-
-                elif c2.kind == nnkStmtList:
-                    abs = false
-
-                    c1[i2] = talkTree(
-                        c2,
-                        proc(node: NimNode, ctx: NimNode): NimNode =
-                            result = copyNimNode(node)
-
-                            if node.kind == nnkCall and node[0].kind == nnkDotExpr:
-                                var
-                                    current = node[0]
-
-                                while current.kind in [nnkCall, nnkDotExpr]:
-                                    current = current[0]
-
-                                if current.kind == nnkIdent and current.strVal == "super":
-                                    result = newNimNode(nnkCommand).add(
-                                        newIdentNode("procCall"),
-                                        talkTree(
-                                            node,
-                                            proc(node: NimNode, ctx: NimNode): NimNode =
-                                                result = copyNimNode(node)
-
-                                                if node.kind == nnkIdent:
-                                                    if node.strVal == "super":
-                                                        result = newNimNode(nnkCall).add(
-                                                            newIdentNode(parent),
-                                                            newIdentNode("this")
-                                                        )
-                                        )
-                                    )
-
-                            if node.kind == nnkIdent:
-                                if node.strVal == "self":
-                                    if stc == false:
-                                        result = newIdentNode(target)
-
-                                elif node.strVal == "proto":
-                                    result = newIdentNode(parent)
-
-                                elif node.strVal == "super":
-                                    result = newNimNode(nnkCall).add(
-                                        newIdentNode(parent),
-                                        newIdentNode("this")
-                                    )
-                    )
+            if c1[4].kind == nnkPragma:
+                for i2, c2 in c1[4]:
+                    if c2.kind == nnkIdent:
+                        if c2.strVal == "static":
+                            stc = true
+                        if c2.strVal == "mutator":
+                            cpy = false
 
             for i2, c2 in c1:
                 if c2.kind == nnkFormalParams:
+                    if c2[0].kind == nnkIdent: # check return type
+                        if c2[0].strVal == "self":
+                            c2[0] = newIdentNode(target)
+
+                    c2.insert(1, newNimNode(nnkIdentDefs)) # insert first parameter placeholder
+
                     if stc == true:
                         c2[1].add(newIdentNode("self"))
                         c2[1].add(newNimNode(nnkBracketExpr).add(
@@ -282,7 +236,88 @@ macro begin*(scope: typedesc, body: untyped) =
 
                     c2[1].add(newEmptyNode())
 
-                    break;
+                if c2.kind == nnkStmtList:
+                    abs = false
+                    var
+                        transform: TreeCall
+
+                    transform = proc(node: NimNode, ctx: NimNode): NimNode =
+                            result = copyNimNode(node)
+
+                            if node.kind == nnkCall and node[0].kind == nnkDotExpr:
+                                var
+                                    current = node[0]
+
+                                while current.kind in [nnkCall, nnkDotExpr]:
+                                    current = current[0]
+
+                                if current.kind == nnkIdent:
+                                    if current.strVal == "super":
+                                        result = newNimNode(nnkCommand).add(
+                                            newIdentNode("procCall"),
+                                            talkTree(
+                                                node,
+                                                proc(node: NimNode, ctx: NimNode): NimNode =
+                                                    result = copyNimNode(node)
+
+                                                    if node.kind == nnkIdent:
+                                                        if node.strVal == "super":
+                                                            result = newNimNode(nnkCall).add(
+                                                                newIdentNode(parent),
+                                                                newIdentNode("this")
+                                                            )
+                                            )
+                                        )
+
+                            if node.kind == nnkIdent:
+                                if node.strVal == "self":
+                                    if stc == false:
+                                        result = newIdentNode(target)
+
+                                elif node.strVal == "proto":
+                                    result = newIdentNode(parent)
+
+                                elif node.strVal == "super" and not stc:
+                                    result = newNimNode(nnkCall).add(
+                                        newIdentNode(parent),
+                                        newIdentNode("this")
+                                    )
+
+                                elif node.strVal == "fmt":
+                                    var
+                                        idx = 0
+                                        cnt = 0
+                                        str = ""
+                                        tmp = ""
+                                        ast: NimNode
+
+                                    while idx < ctx[1].strVal.len:
+                                        if ctx[1].strVal[idx] == '}':
+                                            if cnt > 0:
+                                                dec cnt
+
+                                            if cnt == 0:
+                                                ast = parseStmt(tmp)
+                                                tmp = ""
+
+                                                str.add(
+                                                    repr(talkTree(ast, transform))
+                                                        .strip(chars = {' ', '\t', '\n'})
+                                                )
+
+                                        if cnt > 0:
+                                            tmp.add(ctx[1].strVal[idx])
+                                        else:
+                                            str.add(ctx[1].strVal[idx])
+
+                                        if ctx[1].strVal[idx] == '{':
+                                            inc cnt
+
+                                        inc idx
+
+                                    ctx[1] = newStrLitNode(str)
+
+                    c1[i2] = talkTree(c2, transform)
 
             if abs:
                 c1[c1.len - 1] = newNimNode(nnkStmtList).add(
@@ -309,7 +344,6 @@ macro begin*(scope: typedesc, body: untyped) =
                 static:
                     typeCode[currentSourcePath() & '.' & `target`] = newStmtList() # TODO:
     )
-
 
     result = body
 
@@ -412,6 +446,8 @@ macro resolve(facet: untyped): untyped =
 macro shape*(scope: typedesc, body: untyped): untyped =
     result = newStmtList()
 
+    mixin begin
+
     var copy = copyNimTree(body)
     var count = 0
 
@@ -420,8 +456,9 @@ macro shape*(scope: typedesc, body: untyped): untyped =
     #
 
     for item in copy[0][1]:
-        var facet: NimNode = nil
-        var class: NimNode = nil
+        var
+            facet: NimNode = nil
+            class: NimNode = nil
 
         if item.kind == nnkObjConstr:
             facet = item
@@ -430,6 +467,10 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 
         if facet != nil:
             class = facet[0]
+
+            let
+                target = scope.strVal
+                entry = copyNimTree(body)
 
             inc count
 
@@ -466,7 +507,6 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 begin Facet:
     proc `[]`*(T: typedesc): T =
         result = T.value(this.call)
-#        if defined this.call:
 
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
