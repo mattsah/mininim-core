@@ -64,7 +64,10 @@ begin App:
                 when defined(debug):
                     echo fmt "created[{align($T.typeID, 3, '0')}]: new instance of '{$T}'"
 
-    proc build*(app: App = nil): self {. static .} =
+    proc build*(): self {. static .} =
+        return self.init(config)
+
+    proc build(app: App = nil): self {. static .} =
         return self.init(config)
 
 shape App: @[

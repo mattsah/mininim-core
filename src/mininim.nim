@@ -38,13 +38,13 @@ type
     Class* {. inheritable .} = ref object
     Closure* = distinct auto
 
-    TypedPointer* = ref object
+    TrappedPointer* = ref object
         data: pointer
         name: string
         size: int
 
     InitHook = proc(): void {. closure, gcsafe .}
-    TrapHook = proc(this: Facet): TypedPointer {. nimcall .}
+    TrapHook = proc(this: Facet): TrappedPointer {. nimcall .}
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     Storage* = object
@@ -62,7 +62,7 @@ type
         app*: App
         class*: TypeID
         scope*: TypeID
-        call*: TypedPointer
+        call*: TrappedPointer
 
     Hook* = ref object of Facet
         init*: bool = false
@@ -85,49 +85,72 @@ var
 let
     config* = Config()
 
-proc init*(this: auto) =
-    discard
+#[
+    Converters
+]#
+converter typeID*(T: typedesc): TypeID =
+    const id = nextTypeID.value
 
-proc `%`*(p: App): JsonNode =
-    result = newJInt(cast[int](addr p))
+    static:
+        when defined(debug):
+            echo fmt "Registering {$T} with id {id}"
+
+        inc nextTypeID
+
+    result = id.TypeID
+
+converter toBool(this: string): bool =
+    result = this.len > 0
+
+converter toBool(this: int): bool =
+    result = this > 0
+
+proc `%`*(a: App): JsonNode =
+    result = newJInt(cast[int](addr a))
 
 proc `%`*(p: pointer): JsonNode =
     result = newJInt(cast[int](p))
 
 proc `%`*(t: tuple): JsonNode =
-  result = newJObject()
-  for k, v in t.fieldPairs():
-    result[k] = % v
+    result = newJObject()
+
+    for k, v in t.fieldPairs():
+        result[k] = % v
 
 proc type*(self: typedesc): TypeID =
     result = self.typeID
 
-proc trap*[V](self: typedesc, value: V): TypedPointer =
-    var
-        head: pointer
+#[
+    Constructor
+]#
 
-    let
-        name = name(V)
-        size = sizeof(V)
+proc init*(this: auto) =
+    discard
 
-    when V is not ref:
-        head = alloc(size)
-
-        copyMem(head, unsafeAddr value, size)
-
+macro init*(self: typedesc, args: varargs[untyped]): untyped =
+    if args.len > 0:
+        result = quote do:
+            block:
+                var this = system.new(`self`)
+                this.init(`args`)
+                this
     else:
-        head = addr value
+        result = quote do:
+            block:
+                var this = system.new(`self`)
+                this.init()
+                this
 
-    result = TypedPointer(
-        data: head,
-        name: name,
-        size: size,
-    )
+##
+##    Class definitions
+##
 
-    when defined(debug):
-        echo fmt "trapped[{align($result.size, 3, '0')}]: {result.name} @ {$cast[int](result.data)}"
 
-proc get*(self: typedesc, this: TypedPointer): ptr self {. gcsafe .} =
+
+#[
+    Get the typed/casted pointer back as for a given TrappedPointer
+]#
+proc get*(self: typedesc, this: TrappedPointer): ptr self {. gcsafe .} =
 #    if $T != this.name:
 #        raise newException(CatchableError, "Type mismatch: expected one of " & this.name & ", got " & $T)
 #    if this.kind != Closure and sizeof(T) != this.size:
@@ -137,7 +160,10 @@ proc get*(self: typedesc, this: TypedPointer): ptr self {. gcsafe .} =
 
     result = cast[ptr self](this.data)
 
-proc value*(self: typedesc, this: TypedPointer): self {. gcsafe .}=
+#[
+    Get the typed/casted dereferenced pointer back for a given TrappedPointer
+]#
+proc value*(self: typedesc, this: TrappedPointer): self {. gcsafe .}=
     let
         p = self.get(this)
 
@@ -155,6 +181,48 @@ proc value*(self: typedesc, this: TypedPointer): self {. gcsafe .}=
     when defined(debug):
         echo fmt "secured[{align($this.size, 3, '0')}]: {this.name} @ {$cast[int](this.data)}"
 
+#[
+    Trap a variable's raw pointer (including closures) and get a TrappedPointer in its place
+]#
+proc trap*[V](self: typedesc, value: V): TrappedPointer =
+    var
+        head: pointer
+
+    let
+        name = name(V)
+        size = sizeof(V)
+
+    when V is not ref:
+        head = alloc(size)
+
+        copyMem(head, unsafeAddr value, size)
+
+    else:
+        head = addr value
+
+    result = TrappedPointer(
+        data: head,
+        name: name,
+        size: size,
+    )
+
+    when defined(debug):
+        echo fmt "trapped[{align($result.size, 3, '0')}]: {result.name} @ {$cast[int](result.data)}"
+
+##
+##    Class definitions
+##
+
+template infix*() {. pragma .}
+template static*() {. pragma .}
+template mutator*() {. pragma .}
+template abstract*() {. pragma .}
+
+#[
+    Recurisvely walk an entire NimNode's treee structure and recreate it.  The resulting TreeCall
+    can either copy the node (with modificaitons) or create a totally new one in its place.  It
+    can use the context (ctx) to look to the parent node and its siblings as well.
+]#
 proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
     result = call(node, ctx)
 
@@ -162,24 +230,11 @@ proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. com
         for i, child in node:
             result.add(talkTree(child, call, node))
 
-converter typeID*(T: typedesc): TypeID =
-    const id = nextTypeID.value
-
-    static:
-        when defined(debug):
-            echo fmt "Registering {$T} with id {id}"
-
-        inc nextTypeID
-
-    result = id.TypeID
-
-template static*() {. pragma .}
-template mutator*() {. pragma .}
-template abstract*() {. pragma .}
-
-macro clone*(body: untyped) =
-    result = body
-
+#[
+    Transforms all proc, method, template, converters, and iterators with requisite OOP programming
+    paradigms.  This adds suppor for implied `this`, `self`, `super`, and `proc`, taking hints
+    from the pragma.
+]#
 macro begin*(scope: typedesc, body: untyped) =
     var
         parent: string
@@ -194,11 +249,13 @@ macro begin*(scope: typedesc, body: untyped) =
         parent = "Class"
 
     for i1, c1 in body:
-        if c1.kind in [nnkMethodDef, nnkProcDef, nnkIteratorDef]:
+        if c1.kind in [nnkMethodDef, nnkProcDef, nnkTemplateDef, nnkConverterDef, nnkIteratorDef]:
             var
                 stc = false
                 abs = false
+                ifx = false
                 cpy = true
+                loc = 1
 
             if c1[4].kind == nnkPragma:
                 for i2, c2 in c1[4]:
@@ -209,6 +266,8 @@ macro begin*(scope: typedesc, body: untyped) =
                             cpy = false
                         if c2.strVal == "abstract":
                             abs = true
+                        if c2.strVal == "infix":
+                            ifx = true
 
             for i2, c2 in c1:
                 if c2.kind == nnkFormalParams:
@@ -216,26 +275,29 @@ macro begin*(scope: typedesc, body: untyped) =
                         if c2[0].strVal == "self":
                             c2[0] = newIdentNode(target)
 
-                    c2.insert(1, newNimNode(nnkIdentDefs)) # insert first parameter placeholder
+                    if ifx:
+                        loc = c2.len
+
+                    c2.insert(loc, newNimNode(nnkIdentDefs)) # insert first parameter placeholder
 
                     if stc == true:
-                        c2[1].add(newIdentNode("self"))
-                        c2[1].add(newNimNode(nnkBracketExpr).add(
+                        c2[loc].add(newIdentNode("self"))
+                        c2[loc].add(newNimNode(nnkBracketExpr).add(
                             newIdentNode("typedesc"),
                             newIdentNode(target)
                         ))
 
                     elif cpy == true:
-                        c2[1].add(newIdentNode("this"))
-                        c2[1].add(newIdentNode(target))
+                        c2[loc].add(newIdentNode("this"))
+                        c2[loc].add(newIdentNode(target))
 
                     else:
-                        c2[1].add(newIdentNode("this"))
-                        c2[1].add(newNimNode(nnkVarTy).add(
+                        c2[loc].add(newIdentNode("this"))
+                        c2[loc].add(newNimNode(nnkVarTy).add(
                             newIdentNode(target)
                         ))
 
-                    c2[1].add(newEmptyNode())
+                    c2[loc].add(newEmptyNode())
 
                 if c2.kind == nnkStmtList:
                     var
@@ -348,21 +410,14 @@ macro begin*(scope: typedesc, body: untyped) =
 
     result = body
 
-macro init*(self: typedesc, args: varargs[untyped]): untyped =
-    if args.len > 0:
-        result = quote do:
-            block:
-                var this = system.new(`self`)
-                this.init(`args`)
-                this
-    else:
-        result = quote do:
-            block:
-                var this = system.new(`self`)
-                this.init()
-                this
+##
+##    Class definitions
+##
+
 #[
-    Responsible for resolving facetNodes and adding them to the config.
+    The resolve macro is responsible for finalizing the facet object and adding it to the
+    global configuration.  This includes setting up call properties based on hooks as well
+    as any transformation of OOP keywords.
 ]#
 macro resolve(facet: untyped): untyped =
     result = newStmtList()
@@ -428,7 +483,7 @@ macro resolve(facet: untyped): untyped =
             newIdentNode("call"),
             quote do:
                 TrapHook.trap(
-                    proc(`this`: Facet): TypedPointer =
+                    proc(`this`: Facet): TrappedPointer =
                         result = Closure.trap(`call`)
                 )
         ))
@@ -504,6 +559,13 @@ macro shape*(scope: typedesc, body: untyped): untyped =
     when defined(debug):
         echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"
 
+##
+##    Class definitions
+##
+
+#[
+
+]#
 begin Facet:
     proc `[]`*(T: typedesc): T =
         result = T.value(this.call)
@@ -522,6 +584,9 @@ begin Facet:
                     result = false
                     break
 
+#[
+
+]#
 begin Config:
     method add*(facet: Facet): void {. base .}=
         this.data.add(facet)
@@ -543,6 +608,9 @@ begin Config:
         else:
             result = nil
 
+#[
+
+]#
 begin App:
     method init*(config: Config): void {. base, mutator .}=
         this.config = config.deepCopy
