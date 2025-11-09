@@ -1,4 +1,5 @@
 import
+    mininim,
     mininim/dyn
 
 export

@@ -3,9 +3,6 @@
 import
     mininim
 
-export
-    mininim
-
 type
     dyn* = ref object of Class
         value: JsonNode = newJNull()

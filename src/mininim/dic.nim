@@ -1,6 +1,5 @@
 import
-    mininim,
-    std/tables
+    mininim
 
 type
     Shared* = ref object of Facet
