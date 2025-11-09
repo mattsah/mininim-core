@@ -78,15 +78,22 @@ begin dyn:
             else:
                 result = false
 
+    converter toSeq*(): seq[dyn] =
+        case this.value.kind:
+            of JArray:
+                result = this.value.mapIt(it.toDyn)
+            else:
+                result = @[this]
+
     proc `$`*(): string =
         return this
 
     proc `%`*(): JsonNode =
         return this
 
-    #[
-        Equality
-    ]#
+    #
+    # Equality
+    #
 
     proc `==`*(that: dyn): self =
         var
@@ -111,9 +118,9 @@ begin dyn:
     proc `==`*(that: auto): self {. infix .} =
         result = this == self(value: % that)
 
-    #[
-        Addition
-    ]#
+    #
+    # Addition
+    #
 
     proc `+`*(that: dyn): self =
         var
@@ -172,9 +179,192 @@ begin dyn:
     proc `+`*(that: auto): self {. infix } =
         result = this + self(value: % that)
 
-    #[
-        Access
-    ]#
+    #
+    # Subtraction
+    #
+
+    proc `-`*(that: dyn): self =
+        var
+            value = self()
+
+        case this.value.kind:
+            of JInt:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(int(this) - int(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) - float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JFloat:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(float(this) - float(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) - float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JString:
+                case that.value.kind:
+                    of JInt, JFloat, JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JArray:
+                value = self(value: copy this.value)
+
+                case that.value.kind:
+                    of JArray:
+                        for i in that.value:
+                            value.add(copy i)
+                    else:
+                        value.add(that.value)
+            else:
+                discard
+
+        if value == null:
+            raise newException(
+                ValueError,
+                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+            )
+
+        result = value
+
+    proc `-`*(that: auto): self =
+        result = this - self(value: % that)
+
+    proc `-`*(that: auto): self {. infix } =
+        result = this - self(value: % that)
+
+    #
+    # Multiplication
+    #
+
+    proc `*`*(that: dyn): self =
+        var
+            value = self()
+
+        case this.value.kind:
+            of JInt:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(int(this) * int(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) * float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JFloat:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(float(this) * float(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) * float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JString:
+                case that.value.kind:
+                    of JInt, JFloat, JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JArray:
+                value = self(value: copy this.value)
+
+                case that.value.kind:
+                    of JArray:
+                        for i in that.value:
+                            value.add(copy i)
+                    else:
+                        value.add(that.value)
+            else:
+                discard
+
+        if value == null:
+            raise newException(
+                ValueError,
+                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+            )
+
+        result = value
+
+    proc `*`*(that: auto): self =
+        result = this * self(value: % that)
+
+    proc `*`*(that: auto): self {. infix } =
+        result = this * self(value: % that)
+
+    #
+    # Multiplication
+    #
+
+    proc `/`*(that: dyn): self =
+        var
+            value = self()
+
+        case this.value.kind:
+            of JInt:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(int(this) / int(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) / float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JFloat:
+                case that.value.kind:
+                    of JInt:
+                        value = self(value: %(float(this) / float(that)))
+                    of JFloat:
+                        value = self(value: %(float(this) / float(that))) # causes recursion if different
+                    of JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JString:
+                case that.value.kind:
+                    of JInt, JFloat, JString:
+                        value = self(value: %(string(this) & string(that)))
+                    else:
+                        discard
+            of JArray:
+                value = self(value: copy this.value)
+
+                case that.value.kind:
+                    of JArray:
+                        for i in that.value:
+                            value.add(copy i)
+                    else:
+                        value.add(that.value)
+            else:
+                discard
+
+        if value == null:
+            raise newException(
+                ValueError,
+                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+            )
+
+        result = value
+
+    proc `/`*(that: auto): self =
+        result = this / self(value: % that)
+
+    proc `/`*(that: auto): self {. infix } =
+        result = this / self(value: % that)
+
+    #
+    # Access
+    #
 
     proc `[]`*(field: string): self =
         case this.value.kind:
@@ -185,7 +375,10 @@ begin dyn:
                     result = newJNull()
 
             else:
-                raise newException(ValueError, fmt "Cannot read property from non object/array data")
+                raise newException(
+                    ValueError,
+                    fmt "Cannot read property '{field}' from non object/array data"
+                )
 
     proc `[]=`*(key: string, value: auto): void =
         case this.value.kind:
@@ -210,17 +403,3 @@ begin dyn:
 
     template `.=`*(field: untyped, value: auto): void =
         this[astToStr(field)] = value
-
-    #[
-        Filters
-    ]#
-
-    proc join*(separator: dyn): dyn =
-        case this.value.kind:
-            of JArray:
-                result = dyn(
-                    value: % this.value.mapIt(dyn(value: %it)).join(separator)
-                )
-
-            else:
-                raise newException(ValueError, fmt "Cannot join a {this.value.kind}")

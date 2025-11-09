@@ -1,0 +1,404 @@
+import
+    mininim/dyn
+
+export
+    dyn
+
+type
+    msTK = enum
+        msPunc, msWord, msString, msFloat, msBool, msInt, msOp, msEOF
+
+    msToken = object
+        case kind: msTK
+            of msEOF:
+                discard
+            of msInt:
+                intVal: int
+            of msFloat:
+                floatVal: float
+            of msString:
+                strVal: string
+            of msBool:
+                boolVal: bool
+            of msPunc:
+                puncVal: string
+            of msWord:
+                wordVal: string
+            of msOp:
+                opVal: string
+
+    msNK = enum
+        msNInt, msNFloat, msNString, msNIdent, msNField, msNCall,
+        msNBinaryOp, msNUnaryOp, msNArray
+
+    msNode = ref object
+        case kind: msNK
+            of msNInt:
+                intVal: int
+            of msNFloat:
+                floatVal: float
+            of msNString:
+                strVal: string
+            of msNIdent:
+                identName: string
+            of msNField:
+                fieldObj: msNode
+                fieldName: string
+            of msNCall:
+                methodObj: msNode
+                methodName: string
+                methodArgs: seq[msNode]
+            of msNBinaryOp:
+                left: msNode
+                right: msNode
+                binaryOp: string
+            of msNUnaryOp:
+                operand: msNode
+                unaryOp: string
+            of msNArray:
+                elements: seq[msNode]
+
+    Parser* = ref object of Class
+        tokens: seq[msToken]
+        pos: int
+
+begin msToken:
+    method value(): string {. base .} =
+        result = case this.kind:
+            of msEOF:
+                ""
+            of msInt:
+                $this.intVal
+            of msFloat:
+                $this.floatVal
+            of msString:
+                $this.strVal
+            of msBool:
+                $this.boolVal
+            of msPunc:
+                $this.puncVal
+            of msWord:
+                $this.wordVal
+            of msOp:
+                $this.opVal
+
+begin msNode:
+    method value(scope: dyn): dyn {. base .} =
+        result = dyn()
+
+        case this.kind:
+            of msNInt:
+                result = this.intVal
+            of msNIdent:
+                result = scope[this.identName]
+            of msNBinaryOp:
+                case this.binaryOp:
+                    of "+":
+                        result = this.left.value(scope) + this.right.value(scope)
+                    of "-":
+                        result = this.left.value(scope) - this.right.value(scope)
+                    of "*":
+                        result = this.left.value(scope) * this.right.value(scope)
+                    of "/":
+                        result = this.left.value(scope) / this.right.value(scope)
+            of msNField:
+                result = this.fieldObj.value(scope)[this.fieldName]
+
+            else:
+                raise newException(ValueError, "Not implemented yet")
+
+
+
+begin Parser:
+    method parseExpr(): msNode {. base .}
+    proc lex(code: string): seq[msToken] {. static .}
+
+    proc eval*(code: string, scope: dyn = ()): dyn {. static .}=
+        let
+            tokens = self.lex(code)
+            parser = self(tokens: tokens)
+
+        echo pretty(% tokens)
+
+        let
+            tree = parser.parseExpr()
+
+        echo pretty(% tree)
+
+        result = tree.value(scope)
+
+    proc lex(code: string): seq[msToken] {. static .} =
+        var
+            i = 0
+
+        while i < code.len:
+            case code[i]:
+                #[
+                    Punc
+                ]#
+                of '.', '(', ')', '[', ']', ',', ':':
+                    result.add(msToken(kind: msPunc, puncVal: $code[i]))
+
+                #[
+                    Symbolic Operators
+                ]#
+                of '+', '-', '*', '/', '=', '!':
+                    result.add(msToken(kind: msOp, opVal: $code[i]))
+
+                #[
+                    Numbers
+                ]#
+                of '0'..'9':
+                    var
+                        number = ""
+                        decimal = false
+
+                    while i < code.len and code[i] in {'0'..'9', '.'}:
+                        if code[i] == '.':
+                            if decimal:
+                                raise newException(ValueError, "Invalid syntax")
+                            else:
+                                decimal = true
+
+                        number.add(code[i])
+
+                        inc i
+
+                    if decimal:
+                        result.add(msToken(kind: msFloat, floatVal: parseFloat(number)))
+                    else:
+                        result.add(msToken(kind: msInt, intVal: parseInt(number)))
+
+                    dec i
+
+                #[
+                    Idents, Keywords, and Word Operators
+                ]#
+                of 'a'..'z', 'A'..'Z', '_':
+                    var
+                        ident = ""
+
+                    while i < code.len and code[i] in {'a'..'z', 'A'..'Z', '0'..'9', '_'}:
+                        ident.add(code[i])
+                        inc i
+
+                    dec i
+
+                    case ident.toLower:
+                        of "true":
+                            result.add(msToken(kind: msBool, boolVal: true))
+                        of "false":
+                            result.add(msToken(kind: msBool, boolVal: false))
+                        of "not":
+                            result.add(msToken(kind: msOp, opVal: $'!'))
+                        of "and":
+                            result.add(msToken(kind: msOp, opVal: $'&'))
+                        of "or":
+                            result.add(msToken(kind: msOp, opVal: $'|'))
+                        else:
+                            result.add(msToken(kind: msWord, wordVal: ident))
+
+                #[
+                    Strings
+                ]#
+                of '\'', '"':
+                    var
+                        close = code[i]
+                        value = ""
+
+                    inc i
+                    while i < code.len:
+                        if code[i] == '\\':
+                            inc i
+                            case code[i]:
+                                of 'n': value.add('\n')
+                                of 't': value.add('\t')
+                                of '\\': value.add('\\')
+                                else:
+                                    if code[i+1] == close:
+                                        value.add(close)
+                                    else:
+                                        discard
+                        elif code[i] != close:
+                            value.add(code[i])
+                            inc i
+                        else:
+                            break
+
+                    result.add(msToken(kind: msString, strVal: value))
+
+                else:
+                    discard
+            inc i
+
+    method current(): msToken {. base .}=
+        if
+            this.pos < this.tokens.len: this.tokens[this.pos]
+        else:
+            msToken(kind: msEOF)
+
+    method consume(expected: msTK, value: string = "") {. base .} =
+        if this.current.kind == expected and (value == "" or value == this.current.value):
+            inc this.pos
+        else:
+            raise newException(
+                ValueError,
+                fmt "Expected {$expected}[{$value}] but got {$this.current.kind}[{$this.current.value}]"
+            )
+
+    method parsePrimary(): msNode {. base .} =
+        case this.current.kind
+            of msInt:
+                result = msNode(
+                    kind: msNInt,
+                    intVal: this.current.intVal
+                )
+                this.consume(msInt)
+
+            of msFloat:
+                result = msNode(
+                    kind: msNFloat,
+                    floatVal: this.current.floatVal
+                )
+                this.consume(msFloat)
+
+            of msString:
+                result = msNode(
+                    kind: msNString,
+                    strVal: this.current.strVal
+                )
+                this.consume(msString)
+
+            of msWord:
+                let
+                    name = this.current.wordVal
+
+                result = msNode(
+                    kind: msNIdent,
+                    identName: name
+                )
+                this.consume(msWord)
+
+            of msPunc:  # Array literal: [1, 2, 3]
+                if this.current.value == "[":
+                    this.consume(msPunc)
+                    var
+                        elements: seq[msNode]
+
+                    # Parse array elements
+                    if this.current.kind != msPunc or this.current.value != "]":
+                        while true:
+                            elements.add(this.parseExpr())
+
+                            if this.current.kind == msPunc and this.current.value != ",":
+                                break
+
+                            this.consume(msPunc)
+
+                    this.consume(msPunc, "]")
+
+                    result = msNode(
+                        kind: msNArray,
+                        elements: elements
+                    )
+
+                elif this.current.value == "(":
+                    this.consume(msPunc, "(")
+                    result = this.parseExpr()
+                    this.consume(msPunc, ")")
+
+            of msOp: # Unary
+                if this.current.value == "-":
+                    this.consume(msOp, "-")
+                    result = msNode(
+                        kind: msNUnaryOp,
+                        unaryOp: "-",
+                        operand: this.parsePrimary()
+                    )
+            else:
+                raise newException(
+                    ValueError,
+                    "Unexpected token in primary: " & $this.current.kind
+                )
+
+    # Parse field access and method calls: foo.bar.test("1", bar.foo)
+    method parseAccess(): msNode {. base .} =
+        result = this.parsePrimary()
+
+        while this.current.kind == msPunc and this.current.value[0] in {'.', '('}:
+            if this.current.value == ".":
+                this.consume(msPunc, ".")
+
+                if this.current.kind == msWord:
+                    let
+                        field = this.current.value
+
+                    this.consume(msWord)
+
+                    # Check if this is followed by parentheses (method call)
+                    if this.current.kind == msPunc and this.current.value[0] == '(':
+                        this.consume(msPunc, "(")
+
+                        var
+                            args: seq[msNode]
+
+                        # Parse arguments
+                        if this.current.kind != msPunc or this.current.value[0] != ')':
+                            while true:
+                                args.add(this.parseExpr())
+
+                                if this.current.kind != msPunc or this.current.value[0] != ',':
+                                    break
+
+                                this.consume(msPunc, ",")
+
+                        this.consume(msPunc, ")")
+
+                        result = msNode(
+                            kind: msNCall,
+                            methodObj: result,
+                            methodName: field,
+                            methodArgs: args
+                        )
+
+                    # Regular field access
+                    else:
+                        result = msNode(
+                            kind: msNField,
+                            fieldObj: result,
+                            fieldName: field
+                        )
+
+    # Parse multiplication/division
+    method parseTerm(): msNode {. base .} =
+        result = this.parseAccess()
+
+        while this.current.kind == msOp and this.current.value[0] in {'*', '/'}:
+            let
+                operator = this.current.value
+
+            this.consume(this.current.kind)
+
+            result = msNode(
+                kind: msNBinaryOp,
+                left: result,
+                right: this.parseAccess(),
+                binaryOp: operator
+            )
+
+    # Parse addition/subtraction
+    method parseExpr(): msNode {. base .}=
+        result = this.parseTerm()
+
+        while this.current.kind == msOp and this.current.value[0] in {'+', '-', '&', '|'}:
+            let
+                operator = this.current.value
+
+            this.consume(this.current.kind)
+
+            result = msNode(
+                kind: msNBinaryOp,
+                left: result,
+                right: this.parseTerm(),
+                binaryOp: operator
+            )
