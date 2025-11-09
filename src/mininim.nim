@@ -82,6 +82,7 @@ const
 var
     facetPlans {. compileTime .} = newSeq[Plan]()
     facetNodes {. compileTime .} = newSeq[NimNode]()
+
 let
     config* = Config()
 
@@ -612,7 +613,7 @@ begin Config:
 
 ]#
 begin App:
-    method init*(config: Config): void {. base, mutator .}=
+    method init*(): void {. base, mutator .}=
         this.config = config.deepCopy
 
         initLock(this.store.lock)
