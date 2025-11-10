@@ -112,13 +112,6 @@ converter toBool*(this: int): bool =
     when defined debug:
         echo fmt "Converted [int] {$this} to bool"
 
-converter toSeq*[T, N: int](this: array[N, T]): seq[T] =
-    result = newSeq[T](N.high)
-    for i in 0..<N.high:
-        result[i] = this[i]
-    when defined debug:
-        echo fmt "Converted [array[{$N}, {$T}]] {$this} to seq[{$T}]"
-
 proc `%`*(a: App): JsonNode =
     result = newJInt(cast[int](addr a))
 

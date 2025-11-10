@@ -73,7 +73,6 @@ converter toDyn*(this: tuple): dyn =
         echo fmt "Converting [tuple] {$this} to dynamic value"
     block translate:
         for key, value in json:
-            echo key
             if key != "Field" & $current:
                 result = dyn(value: json)
                 break translate;
