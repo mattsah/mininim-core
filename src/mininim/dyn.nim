@@ -628,6 +628,5 @@ begin dyn:
     self.register(
         "join",
         proc(separator: string = ""): self =
-            echo this.value.kind
-            result = @this.join(separator)
+            result = @this.join(separator) # Convert explicitly to a sequence before joining
     )
