@@ -67,6 +67,8 @@ type
     Hook* = ref object of Facet
         init*: bool = false
 
+    Shared* = ref object of Facet
+
     Plan* = tuple[
         realm: string,
         scope: TypeID,
@@ -100,11 +102,22 @@ converter typeID*(T: typedesc): TypeID =
 
     result = id.TypeID
 
-converter toBool(this: string): bool =
+converter toBool*(this: string): bool =
     result = this.len > 0
+    when defined debug:
+        echo fmt "Converted [string] {this} to bool"
 
-converter toBool(this: int): bool =
+converter toBool*(this: int): bool =
     result = this > 0
+    when defined debug:
+        echo fmt "Converted [int] {$this} to bool"
+
+converter toSeq*[T, N: int](this: array[N, T]): seq[T] =
+    result = newSeq[T](N.high)
+    for i in 0..<N.high:
+        result[i] = this[i]
+    when defined debug:
+        echo fmt "Converted [array[{$N}, {$T}]] {$this} to seq[{$T}]"
 
 proc `%`*(a: App): JsonNode =
     result = newJInt(cast[int](addr a))
@@ -242,15 +255,34 @@ macro begin*(scope: typedesc, body: untyped) =
 
     let
         target = scope.strVal
-        entry = copyNimTree(body)
+        original = copyNimTree(body)
 
     if scope.getImpl[2][0].len > 0 and scope.getImpl[2][0][1].len > 0:
         parent = scope.getImpl[2][0][1][0].strVal
     else:
         parent = "Class"
 
-    for i1, c1 in body:
-        if c1.kind in [nnkMethodDef, nnkProcDef, nnkTemplateDef, nnkConverterDef, nnkIteratorDef]:
+    #
+    # Replace all static keyword instances
+    #
+
+    result = body.talkTree(
+        proc(node: NimNode, ctx: NimNode): NimNode =
+            result = copyNimNode(node)
+
+            if node.kind == nnkIdent:
+                if node.strVal == "self":
+                    result = newIdentNode(target)
+                elif node.strVal == "proto":
+                    result = newIdentNode(parent)
+    )
+
+    #
+    # Do parameter insertion and proc/method/template/etc call replacements
+    #
+
+    for i1, c1 in result:
+        if c1.kind in [nnkMethodDef, nnkProcDef, nnkMacroDef, nnkTemplateDef, nnkConverterDef, nnkIteratorDef]:
             var
                 stc = false
                 abs = false
@@ -272,10 +304,6 @@ macro begin*(scope: typedesc, body: untyped) =
 
             for i2, c2 in c1:
                 if c2.kind == nnkFormalParams:
-                    if c2[0].kind == nnkIdent: # check return type
-                        if c2[0].strVal == "self":
-                            c2[0] = newIdentNode(target)
-
                     if ifx:
                         loc = c2.len
 
@@ -333,14 +361,7 @@ macro begin*(scope: typedesc, body: untyped) =
                                         )
 
                             if node.kind == nnkIdent:
-                                if node.strVal == "self":
-                                    if stc == false:
-                                        result = newIdentNode(target)
-
-                                elif node.strVal == "proto":
-                                    result = newIdentNode(parent)
-
-                                elif node.strVal == "super" and not stc:
+                                if node.strVal == "super" and not stc:
                                     result = newNimNode(nnkCall).add(
                                         newIdentNode(parent),
                                         newIdentNode("this")
@@ -388,7 +409,7 @@ macro begin*(scope: typedesc, body: untyped) =
                         discard
                 )
 
-    body.insert(
+    result.insert(
         0,
         quote do:
             when $(`scope`.type) notin typeIndex:
@@ -400,7 +421,7 @@ macro begin*(scope: typedesc, body: untyped) =
                     result = `scope`.typeID
     )
 
-    body.insert(
+    result.insert(
         0,
         quote do:
             when (currentSourcePath() & '.' & `target`) notin typeCode:
@@ -408,8 +429,6 @@ macro begin*(scope: typedesc, body: untyped) =
                     # TODO: Actually figure out how to cache this
                     typeCode[currentSourcePath() & '.' & `target`] = newStmtList()
     )
-
-    result = body
 
 ##
 ##    Class definitions
@@ -424,11 +443,11 @@ macro resolve(facet: untyped): untyped =
     result = newStmtList()
 
     let
-        currentPlan  = facetPlans[high facetPlans]
-        currentClass = facet[0].strVal
+        target = facet[0].strVal
+        currentPlan = facetPlans[high facetPlans]
 
     var
-        callNode: NimNode = nil
+        callNode: NimNode
 
     # Check if current facet has a call and remove corresponding node from property and store
 
@@ -475,7 +494,7 @@ macro resolve(facet: untyped): untyped =
                     if node.kind == nnkIdent:
                         case node.strVal:
                             of "self":
-                                result = newIdentNode(currentClass)
+                                result = newIdentNode(target)
                             of "shape":
                                 result = newIdentNode(currentPlan.realm)
             )
@@ -608,6 +627,17 @@ begin Config:
             result = results[0]
         else:
             result = nil
+
+begin Shared:
+    discard
+
+shape Shared: @[
+    Hook(
+        init: true,
+        call: proc(): void {. closure .} =
+            discard this.app.get(shape)
+    )
+]
 
 #[
 

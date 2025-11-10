@@ -2,23 +2,10 @@ import
     mininim
 
 type
-    Shared* = ref object of Facet
-
     Builder* = ref object of Facet
 
     Delegate* = ref object of Facet
     DelegateHook*[T] = proc(): T {. closure .}
-
-begin Shared:
-    discard
-
-shape Shared: @[
-    Hook(
-        init: true,
-        call: proc(): void {. closure .} =
-            discard this.app.get(shape)
-    )
-]
 
 #[
     Can be extended to provide basic buld functionality

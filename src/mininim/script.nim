@@ -59,7 +59,7 @@ type
             of msNArray:
                 elements: seq[msNode]
 
-    Parser* = ref object of Class
+    Script* = ref object of Class
         tokens: seq[msToken]
         pos: int
 
@@ -90,6 +90,10 @@ begin msNode:
         case this.kind:
             of msNInt:
                 result = this.intVal
+            of msNFloat:
+                result = this.floatVal
+            of msNString:
+                result = this.strVal
             of msNIdent:
                 result = scope[this.identName]
             of msNBinaryOp:
@@ -103,28 +107,41 @@ begin msNode:
                     of "/":
                         result = this.left.value(scope) / this.right.value(scope)
             of msNField:
-                result = this.fieldObj.value(scope)[this.fieldName]
+                let
+                    value = this.fieldObj.value(scope)[this.fieldName]
+
+                if value == null:
+                    result = dyn()
+#                    raise newException(ValueError, "Method did not return a value")
+                else:
+                    result = value
+
+            of msNCall:
+                if dyn.dyn.hasFunction(this.methodName):
+                    result = dyn.dyn.callFunction(
+                        this.methodName,
+                        this.methodObj.value(scope),
+                        this.methodArgs.mapIt(it.value(scope))
+                    )
+
+                else:
+                    raise newException(ValueError, "Invalid method")
 
             else:
                 raise newException(ValueError, "Not implemented yet")
 
-
-
-begin Parser:
+begin Script:
     method parseExpr(): msNode {. base .}
+
     proc lex(code: string): seq[msToken] {. static .}
 
-    proc eval*(code: string, scope: dyn = ()): dyn {. static .}=
+    proc eval*(code: string, scope: dyn = ()): dyn {. static .} =
         let
             tokens = self.lex(code)
             parser = self(tokens: tokens)
 
-        echo pretty(% tokens)
-
         let
             tree = parser.parseExpr()
-
-        echo pretty(% tree)
 
         result = tree.value(scope)
 
