@@ -1,9 +1,9 @@
 import
     mininim,
-    mininim/dyn
+    mininim/dynamic
 
 export
-    dyn
+    dynamic
 
 type
     msTK = enum
@@ -85,8 +85,6 @@ begin msToken:
 
 begin msNode:
     method value(scope: dyn): dyn {. base .} =
-        result = null
-
         case this.kind:
             of msNInt:
                 result = this.intVal
@@ -111,14 +109,14 @@ begin msNode:
                     value = this.fieldObj.value(scope)[this.fieldName]
 
                 if value == null:
-                    result = dyn()
+                    result = null
 #                    raise newException(ValueError, "Method did not return a value")
                 else:
                     result = value
 
             of msNCall:
-                if dyn.dyn.hasFunction(this.methodName):
-                    result = dyn.dyn.callFunction(
+                if dyn.hasFunction(this.methodName):
+                    result = dyn.callFunction(
                         this.methodName,
                         this.methodObj.value(scope),
                         this.methodArgs.mapIt(it.value(scope))
@@ -126,6 +124,8 @@ begin msNode:
 
                 else:
                     raise newException(ValueError, "Invalid method")
+            of msNArray:
+                result = ~this.elements.mapIt(it.value(scope))
 
             else:
                 raise newException(ValueError, "Not implemented yet")

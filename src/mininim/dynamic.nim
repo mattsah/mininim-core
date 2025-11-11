@@ -38,11 +38,15 @@ type
         maxArgc*: int
         call*: FunctionWrapper
 
-var
-    allFunctions = FunctionRegistry()
+const
+    empty* = []
 
 let
     null* = dyn(kind: dynNull)
+
+var
+    allFunctions = FunctionRegistry()
+
 
 #[
     Converters to dyn type
@@ -53,18 +57,15 @@ converter toDyn*(this: Class): dyn =
             echo fmt "Converting [nil] to dynamic value"
         result = dyn(kind: dynNull)
 
-
 converter toDyn*(this: int): dyn =
     when defined debug:
         echo fmt "Converting [int] to dynamic value"
     result = dyn(kind: dynInt, intVal: this)
 
-
 converter toDyn*(this: float): dyn =
     when defined debug:
         echo fmt "Converting [float] to dynamic value"
     result = dyn(kind: dynFloat, floatVal: this)
-
 
 converter toDyn*(this: string): dyn =
     var
@@ -79,75 +80,69 @@ converter toDyn*(this: string): dyn =
     else:
         result = dyn(kind: dynString, stringVal: this)
 
-
 converter toDyn*(this: bool): dyn =
     when defined debug:
         echo fmt "Converting [bool] to dynamic value"
     result = dyn(kind: dynBool, boolVal: this)
 
-
-converter toDyn*[T: auto, N: int](this: array[N, T]): dyn =
-    var
-        value = newSeq[dyn]()
+converter toDyn*[T, N: int](this: array[N, T]): dyn =
     when defined debug:
         echo fmt "Converting [array[{$N}, {$T}]] to dynamic value"
-    for i in this:
-        value.add(toDyn(i))
-    result = dyn(kind: dynArray, arrayVal: value)
+    result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
 
 converter toDyn*[T](this: openArray[T]): dyn =
     when defined debug:
         echo fmt "Converting [openArray[{$T}]] to dynamic value"
-    if this.len == 0:
-        result = dyn(kind: dynArray, arrayVal: dyn(kind: dynArray, arrayVal: newSeq[dyn]()))
-    else:
-        result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
-
+    result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
 
 converter toDyn*(this: tuple): dyn =
     var
         cur = 0
         table = false
         value = newSeq[(string, dyn)]()
-
     when defined debug:
         echo fmt "Converting [tuple] to dynamic value"
+    for key, item in this.fieldPairs:
+        if key != "Field" & $cur:
+            table = true
 
-    block translate:
-        for key, item in this.fieldPairs:
-            if key != "Field" & $cur:
-                table = true
+        value.add((key, toDyn(item)))
+        inc cur
 
-            value.add((key, toDyn(item)))
-            inc cur
-
-        if table:
-            result = dyn(kind: dynObject, objectVal: value.toTable)
-        else:
-            result = dyn(kind: dynArray, arrayVal: value.mapIt(it[1]))
+    if table:
+        result = dyn(kind: dynObject, objectVal: value.toTable)
+    else:
+        result = dyn(kind: dynArray, arrayVal: value.mapIt(it[1]))
 
 #[
     Convert basically anything to a dynamic value
 ]#
-proc `~`*(this: auto): dyn =
-    when typeof(this) is dyn: # Make sure we don't convert twice
-        result = this
-    else:
-        result = toDyn(this)
 
-#[
-    Macros
-]#
 macro `:=`*(this: untyped, value: untyped): untyped =
     if value.kind == nnkBracket and value.len == 0:
         result = quote do:
-            var `this`: dyn = dyn(kind: dynArray, arrayVal: newSeq[dyn]())
+            var `this` = toDyn(newSeq[dyn]())
     else:
         result = quote do:
-            var `this`: dyn = `value`
+            var `this` = toDyn(`value`)
+
+macro `~`*(value: untyped): dyn =
+    if value.kind == nnkBracket and value.len == 0:
+        result = quote do:
+            toDyn(newSeq[dyn]())
+    else:
+        result = quote do:
+            toDyn(`value`)
+
+#[
+    Primary dyn implementation
+]#
 
 begin dyn:
     proc `$`*(): string # Forward declaration for debug messages
+
+    converter toDyn*(): dyn =
+        result = this
 
     converter toInt*(): int =
         when defined debug:
@@ -220,13 +215,13 @@ begin dyn:
         Shorthand for string conversion
     ]#
     proc `$`*(): string =
-        result = this.toString
+        result = toString(this)
 
     #[
         Shorthand for sequence conversion
     ]#
     proc `@`*(): seq[self] =
-        result = this.toSeq
+        result = toSeq(this)
 
 
     #
