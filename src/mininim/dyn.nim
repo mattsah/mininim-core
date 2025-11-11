@@ -1,11 +1,35 @@
 {. experimental: "dotOperators" .}
 
 import
-    mininim
+    mininim,
+    std/parseutils
 
 type
+    dynType* = enum
+        dynInt,
+        dynFloat,
+        dynString,
+        dynObject,
+        dynArray,
+        dynBool,
+        dynNull
+
     dyn* = ref object of Class
-        value: JsonNode = newJNull()
+        case kind: dynType
+            of dynInt:
+                intVal: int
+            of dynFloat:
+                floatVal: float
+            of dynString:
+                stringVal: string
+            of dynObject:
+                objectVal: Table[string, dyn]
+            of dynArray:
+                arrayVal: seq[dyn]
+            of dynBool:
+                boolVal: bool
+            of dynNull:
+                discard
 
     FunctionRegistry* = Table[string, Function]
     FunctionWrapper* = proc(this: dyn, args: seq[dyn]): dyn {. closure .}
@@ -18,74 +42,98 @@ var
     allFunctions = FunctionRegistry()
 
 let
-    null* = dyn()
+    null* = dyn(kind: dynNull)
 
 #[
     Converters to dyn type
 ]#
-converter toDyn*(this: JsonNode): dyn =
-    if this.isNil:
+converter toDyn*(this: Class): dyn =
+    if this == nil:
         when defined debug:
             echo fmt "Converting [nil] to dynamic value"
-        result = dyn()
-    else:
-        when defined debug:
-            echo fmt "Converting [{this.kind}] {$this} to dynamic value"
-        result = dyn(value: this)
+        result = dyn(kind: dynNull)
+
 
 converter toDyn*(this: int): dyn =
     when defined debug:
-        echo fmt "Converting [int] {$this} to dynamic value"
-    result = dyn(value: % this)
+        echo fmt "Converting [int] to dynamic value"
+    result = dyn(kind: dynInt, intVal: this)
+
 
 converter toDyn*(this: float): dyn =
     when defined debug:
-        echo fmt "Converting [float] {$this} to dynamic value"
-    result = dyn(value: % this)
+        echo fmt "Converting [float] to dynamic value"
+    result = dyn(kind: dynFloat, floatVal: this)
+
 
 converter toDyn*(this: string): dyn =
+    var
+        intVal: int
+        floatVal: float
     when defined debug:
-        echo fmt "Converting [string] '{this}' to dynamic value"
-    result = dyn(value: % this)
+        echo fmt "Converting [string] to dynamic value"
+    if this.len > 0 and this.parseInt(intVal) == this.len:
+        result = dyn(kind: dynInt, intVal: intVal)
+    elif this.len > 0 and this.parseFloat(floatVal) == this.len:
+        result = dyn(kind: dynFloat, floatVal: floatVal)
+    else:
+        result = dyn(kind: dynString, stringVal: this)
+
 
 converter toDyn*(this: bool): dyn =
     when defined debug:
-        echo fmt "Converting [bool] '{$this}' to dynamic value"
-    result = dyn(value: % this)
+        echo fmt "Converting [bool] to dynamic value"
+    result = dyn(kind: dynBool, boolVal: this)
+
 
 converter toDyn*[T: auto, N: int](this: array[N, T]): dyn =
-    result = dyn(value: % this.toSeq)
+    var
+        value = newSeq[dyn]()
+    when defined debug:
+        echo fmt "Converting [array[{$N}, {$T}]] to dynamic value"
+    for i in this:
+        value.add(toDyn(i))
+    result = dyn(kind: dynArray, arrayVal: value)
 
 converter toDyn*[T](this: openArray[T]): dyn =
     when defined debug:
-        echo fmt "Converting [openArray[{$T}]] {$this} to dynamic value"
-    result = dyn(value: % this)
+        echo fmt "Converting [openArray[{$T}]] to dynamic value"
+    if this.len == 0:
+        result = dyn(kind: dynArray, arrayVal: dyn(kind: dynArray, arrayVal: newSeq[dyn]()))
+    else:
+        result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
+
 
 converter toDyn*(this: tuple): dyn =
     var
-        current = 0
-
-    let
-        json = % this
-        values = newJArray()
+        cur = 0
+        table = false
+        value = newSeq[(string, dyn)]()
 
     when defined debug:
-        echo fmt "Converting [tuple] {$this} to dynamic value"
-    block translate:
-        for key, value in json:
-            if key != "Field" & $current:
-                result = dyn(value: json)
-                break translate;
+        echo fmt "Converting [tuple] to dynamic value"
 
-            values.add(value)
-            inc current
-        result = dyn(value: values)
+    block translate:
+        for key, item in this.fieldPairs:
+            if key != "Field" & $cur:
+                table = true
+
+            value.add((key, toDyn(item)))
+            inc cur
+
+        if table:
+            result = dyn(kind: dynObject, objectVal: value.toTable)
+        else:
+            result = dyn(kind: dynArray, arrayVal: value.mapIt(it[1]))
 
 #[
     Convert basically anything to a dynamic value
 ]#
-template `~`*(this: untyped): dyn =
-    this.toDyn
+proc `~`*(this: auto): dyn =
+    when typeof(this) is dyn: # Make sure we don't convert twice
+        result = this
+    else:
+        result = toDyn(this)
 
 #[
     Macros
@@ -93,68 +141,78 @@ template `~`*(this: untyped): dyn =
 macro `:=`*(this: untyped, value: untyped): untyped =
     if value.kind == nnkBracket and value.len == 0:
         result = quote do:
-            var `this` = toDyn(newJArray())
+            var `this`: dyn = dyn(kind: dynArray, arrayVal: newSeq[dyn]())
     else:
         result = quote do:
-            var `this` = toDyn(`value`)
+            var `this`: dyn = `value`
 
 begin dyn:
-    converter toJson*(): JsonNode =
-        result = copy this.value
+    proc `$`*(): string # Forward declaration for debug messages
 
     converter toInt*(): int =
         when defined debug:
-            echo fmt "Converting dynamic value {$this} to int"
-
-        case this.value.kind:
-            of JInt:
-                result = this.value.to(int)
-            of JFloat:
-                result = int(this.value.to(float))
+            echo fmt "Converting dynamic value [{this.kind}] to int"
+        case this.kind:
+            of dynInt:
+                result = this.intVal
+            of dynFloat:
+                result = int(this.floatVal)
+            of dynString:
+                if this.stringVal.parseInt(result) != this.stringVal.len:
+                    result = 0
             else:
-                raise newException(ValueError, fmt "Cannot convert {this.value.kind} to integer")
+                raise newException(ValueError, fmt "Cannot convert [{this.kind}] to int")
 
     converter toFloat*(): float =
         when defined debug:
-            echo fmt "Converting dynamic value {$this} to float"
-
-        case this.value.kind:
-            of JInt:
-                result = float(this.value.to(int))
-            of JFloat:
-                result = this.value.to(float)
+            echo fmt "Converting dynamic value [{this.kind}] to float"
+        case this.kind:
+            of dynInt:
+                result = float(this.intVal)
+            of dynFloat:
+                result = this.floatVal
+            of dynString:
+                if this.stringVal.parseFloat(result) != this.stringVal.len:
+                    result = 0
             else:
-                raise newException(ValueError, fmt "Cannot convert {this.value.kind} to float")
+                raise newException(ValueError, fmt "Cannot convert [{this.kind}] to float")
 
     converter toString*(): string =
         when defined debug:
-            echo fmt "Converting dynamic value {$this} to string"
-
-        case this.value.kind:
-            of JString:
-                result = this.value.to(string)
-            else:
-                result = $this.value
+            echo fmt "Converting dynamic value [{this.kind}] to string"
+        case this.kind:
+            of dynInt:
+                result = $this.intVal
+            of dynFloat:
+                result = $this.floatVal
+            of dynString:
+                result = this.stringVal
+            of dynArray:
+                result = '[' & this.arrayVal.join(",") & ']'
+            of dynObject:
+                result = $this.objectVal
+            of dynBool:
+                result = if this.boolVal: "true" else: "false"
+            of dynNull:
+                result = "null"
 
     converter toBool*(): bool =
         when defined debug:
-            echo fmt "Converting dynamic value {$this} to bool"
-
-        case this.value.kind:
-            of JBool:
-                result = this.value.to(bool)
+            echo fmt "Converting dynamic value [{this.kind}] to bool"
+        case this.kind:
+            of dynBool:
+                result = this.boolVal
             else:
                 result = false
 
     converter toSeq*(): seq[self] =
         when defined debug:
-            echo fmt "Converting dynamic value {$this} to dynamic sequence"
-
-        case this.value.kind:
-            of JNull:
+            echo fmt "Converting dynamic value [{this.kind}] to dynamic sequence"
+        case this.kind:
+            of dynNull:
                 result = newSeq[self]()
-            of JArray:
-                result = this.value.mapIt(it.toDyn)
+            of dynArray:
+                result = this.arrayVal
             else:
                 result = @[this]
 
@@ -163,18 +221,6 @@ begin dyn:
     ]#
     proc `$`*(): string =
         result = this.toString
-
-    #[
-        Shorthand for json conversion
-    ]#
-    proc `%`*(): JsonNode =
-        result = this.toJson
-
-    #[
-        Explicitly ensure existing dynamic types are not re-converted
-    ]#
-    proc `~`*(): self =
-        result = this
 
     #[
         Shorthand for sequence conversion
@@ -269,33 +315,28 @@ begin dyn:
     proc functions*(): var FunctionRegistry {. static .} =
         result = allFunctions
 
-
     #
     # Equality
     #
 
     proc `==`*(that: self): self =
-        var
-            equal: bool = false
+        result = dyn(kind: dynBool, boolVal: false)
 
-        case this.value.kind:
-            of JNull:
-                case that.value.kind:
-                    of JNull:
-                        equal = true
+        case this.kind:
+            of dynNull:
+                case that.kind:
+                    of dynNull:
+                        result.boolVal = true
                     else:
                         discard
             else:
                 discard
 
-
-        result = self(value: % equal)
-
     proc `==`*(that: auto): self =
-        result = this == self(value: % that)
+        result = this == toDyn(that)
 
     proc `==`*(that: auto): self {. infix .} =
-        result = this == self(value: % that)
+        result = this == toDyn(that)
 
     #
     # Addition
@@ -303,58 +344,56 @@ begin dyn:
 
     proc `+`*(that: self): self =
         var
-            value = self()
-
-        case this.value.kind:
-            of JInt:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(int(this) + int(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) + float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            value = null
+        case this.kind:
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.intVal + that.intVal)
+                    of dynFloat:
+                        value = ~(float(this.intVal) + that.floatVal) # causes recursion if different
+                    of dynString:
+                        value = ~(this.toString & that.stringVal)
                     else:
                         discard
-            of JFloat:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(float(this) + float(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) + float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            of dynFloat:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.floatVal + float(that.intVal)) # causes recursion if different
+                    of dynFloat:
+                        value = ~(this.floatVal + that.floatVal)
+                    of dynString:
+                        value = ~(this.toString & that.stringVal)
                     else:
                         discard
-            of JString:
-                case that.value.kind:
-                    of JInt, JFloat, JString:
-
-                        value = self(value: %(string(this) & string(that)))
+            of dynString:
+                case that.kind:
+                    of dynInt, dynFloat, dynString:
+                        value = ~(this.stringVal & that.toString)
                     else:
                         discard
-            of JArray:
-                value = self(value: copy this.value)
+            of dynArray:
+                value = deepCopy this
 
-                case that.value.kind:
-                    of JArray:
-                        for i in that.value:
-                            value.add(copy i)
+                case that.kind:
+                    of dynArray:
+                        for i in that.arrayVal:
+                            value.arrayVal.add(deepCopy i)
                     else:
-                        value.add(that.value)
+                        value.arrayVal.add(deepCopy that)
             else:
                 discard
 
         if value == null:
             raise newException(
                 ValueError,
-                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+                fmt "Unsupported operator for dynamic values: {$this.kind} + {$that.kind}"
             )
 
         result = value
 
     proc `+`*(that: auto): self =
-        result = this + self(value: % that)
+        result = this + toDyn(that)
 
     #
     # Subtraction
@@ -362,57 +401,35 @@ begin dyn:
 
     proc `-`*(that: self): self =
         var
-            value = self()
-
-        case this.value.kind:
-            of JInt:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(int(this) - int(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) - float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            value = null
+        case this.kind:
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.intVal - that.intVal)
+                    of dynFloat:
+                        value = ~(float(this.intVal) - that.floatVal) # causes recursion if different
                     else:
                         discard
-            of JFloat:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(float(this) - float(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) - float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            of dynFloat:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.floatVal - float(that.intVal)) # causes recursion if different
+                    of dynFloat:
+                        value = ~(this.floatVal - that.floatVal)
                     else:
                         discard
-            of JString:
-                case that.value.kind:
-                    of JInt, JFloat, JString:
-                        value = self(value: %(string(this) & string(that)))
-                    else:
-                        discard
-            of JArray:
-                value = self(value: copy this.value)
-
-                case that.value.kind:
-                    of JArray:
-                        for i in that.value:
-                            value.add(copy i)
-                    else:
-                        value.add(that.value)
             else:
                 discard
-
         if value == null:
             raise newException(
                 ValueError,
-                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+                fmt "Unsupported operator for dynamic values: {$this.kind} - {$that.kind}"
             )
-
         result = value
 
     proc `-`*(that: auto): self =
-        result = this - self(value: % that)
+        result = this - toDyn(that)
 
     #
     # Multiplication
@@ -420,57 +437,36 @@ begin dyn:
 
     proc `*`*(that: self): self =
         var
-            value = self()
-
-        case this.value.kind:
-            of JInt:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(int(this) * int(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) * float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            value = null
+        case this.kind:
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.intVal * that.intVal)
+                    of dynFloat:
+                        value = ~(float(this.intVal) * that.floatVal) # causes recursion if different
                     else:
                         discard
-            of JFloat:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(float(this) * float(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) * float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            of dynFloat:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.floatVal * float(this.intVal)) # causes recursion if different
+                    of dynFloat:
+                        value = ~(this.floatVal * that.floatVal)
                     else:
                         discard
-            of JString:
-                case that.value.kind:
-                    of JInt, JFloat, JString:
-                        value = self(value: %(string(this) & string(that)))
-                    else:
-                        discard
-            of JArray:
-                value = self(value: copy this.value)
-
-                case that.value.kind:
-                    of JArray:
-                        for i in that.value:
-                            value.add(copy i)
-                    else:
-                        value.add(that.value)
             else:
                 discard
-
         if value == null:
             raise newException(
                 ValueError,
-                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+                fmt "Unsupported operator for dynamic values: {$this.kind} * {$that.kind}"
             )
-
         result = value
 
+
     proc `*`*(that: auto): self =
-        result = this * self(value: % that)
+        result = this * toDyn(that)
 
     #
     # Multiplication
@@ -478,112 +474,104 @@ begin dyn:
 
     proc `/`*(that: self): self =
         var
-            value = self()
-
-        case this.value.kind:
-            of JInt:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(int(this) / int(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) / float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            value = null
+        case this.kind:
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.intVal / that.intVal)
+                    of dynFloat:
+                        value = ~(float(this.intVal) / that.floatVal) # causes recursion if different
                     else:
                         discard
-            of JFloat:
-                case that.value.kind:
-                    of JInt:
-                        value = self(value: %(float(this) / float(that)))
-                    of JFloat:
-                        value = self(value: %(float(this) / float(that))) # causes recursion if different
-                    of JString:
-                        value = self(value: %(string(this) & string(that)))
+            of dynFloat:
+                case that.kind:
+                    of dynInt:
+                        value = ~(this.floatVal / float(that.intVal)) # causes recursion if different
+                    of dynFloat:
+                        value = ~(this.floatVal / that.floatVal)
                     else:
                         discard
-            of JString:
-                case that.value.kind:
-                    of JInt, JFloat, JString:
-                        value = self(value: %(string(this) & string(that)))
-                    else:
-                        discard
-            of JArray:
-                value = self(value: copy this.value)
-
-                case that.value.kind:
-                    of JArray:
-                        for i in that.value:
-                            value.add(copy i)
-                    else:
-                        value.add(that.value)
             else:
                 discard
-
         if value == null:
             raise newException(
                 ValueError,
-                "Unsupported operator '+' for dynamic value: " & astToStr(this)
+                fmt "Unsupported operator for dynamic values: {$this.kind} / {$that.kind}"
             )
 
         result = value
 
+
     proc `/`*(that: auto): self =
-        result = this / self(value: % that)
+        result = this / toDyn(that)
 
     #
-    # Access
+    # Access and Operators
     #
 
     proc `<<`*(): self =
-        case this.value.kind:
-            of JArray:
-                if this.value.len > 0:
-                    result = this.value[0]
-                    this.value = this.value[1..^1]
+        case this.kind:
+            of dynArray:
+                if this.arrayVal.len > 0:
+                    result = deepCopy this.arrayVal[0]
+                    this.arrayVal = this.arrayVal[1..^1]
                 else:
                     raise newException(KeyError, "Cannot shift `<<` on empty array")
             else:
-                result = self()
-                result.value = this.value
-                this.value = newJNull()
+                result = deepCopy this
+
 
     proc `>>`*(): self =
-        case this.value.kind:
-            of JArray:
-                if this.value.len > 0:
-                    result = this.value.elems.pop()
+        case this.kind:
+            of dynArray:
+                if this.arrayVal.len > 0:
+                    result = this.arrayVal.pop()
                 else:
                     raise newException(KeyError, "Cannot shift `>>` on empty array")
-
             else:
-                result = this.value
-                this.value = newJNull()
+                result = deepCopy this
 
-    proc `<<`*(that: self): void =
-        case this.value.kind:
-            of JNull:
-                this.value = % << that
-            of JArray:
-                this.value.add(% << that)
+    proc `<<`*(that: self): void=
+        case this.kind:
+            of dynArray:
+                this.arrayVal.add(<< that)
             else:
-                this.value = % [this.value, % << that]
+                raise newException(KeyError, "Cannot shift `<<` onto a non-array")
+
+                # let
+                #     original = deepCopy this
+
+                # reset(this)
+                # this.kind = dynArray
+                # this.arrayVal.add(original)
+                # this.arrayVal.add(<< that)
 
     proc `>>`*(that: self): void =
-        case this.value.kind:
-            of JNull:
-                that.value = % >> this
-            of JArray:
-                that.value.elems.insert(% >> this, 0)
+        case this.kind:
+            of dynArray:
+                that.arrayVal.insert(>> this, 0)
             else:
-                that.value = % [% >> this, that.value]
+                raise newException(KeyError, "Cannot shift `>>` onto a non-array")
+
+                # let
+                #     original = deepCopy that
+
+                # reset(that)
+                # that.kind = dynArray
+                # this.arrayVal.add(original)
+                # this.arrayVal.add(>> this)
 
     proc `[]`*(field: string): self =
-        case this.value.kind:
-            of JObject:
-                if this.value.hasKey(field):
-                    result = this.value[field]
+        case this.kind:
+            of dynObject:
+                if this.objectVal.hasKey(field):
+                    result = this.objectVal[field]
                 else:
-                    result = newJNull()
+                    raise newException(
+                        ValueError,
+                        fmt "Accessing '{field}' failed, value not defined"
+                    )
 
             else:
                 raise newException(
@@ -592,22 +580,21 @@ begin dyn:
                 )
 
     proc `[]=`*(key: string, value: auto): void =
-        case this.value.kind:
-            of JObject:
+        case this.kind:
+            of dynObject:
                 when value is self:
-                    if null == value:
-                        if this.value.hasKey(key):
-                            this.value.delete(key)
+                    if value == null:
+                        if this.objectVal.hasKey(key):
+                            this.objectVal.del(key)
                     else:
-                        this.value[key] = value
-
-                elif value is JsonNode:
-                    this.value[key] = copy value
-
+                        this.objectVal[key] = value
                 else:
-                    this.value[key] = % value
+                    this.objectVal[key] = value
             else:
-                raise newException(ValueError, fmt "Cannot assign property to non object/array data")
+                raise newException(
+                    ValueError,
+                    fmt "Cannot assign property to non object/array data"
+                )
 
     template `.`*(field: untyped): self =
         this[astToStr(field)]
@@ -624,8 +611,48 @@ begin dyn:
         else:
             this.call
 
+    #[
+
+    ]#
+    proc `of`*(that: Class): self =
+        if that == nil:
+            result = this.kind == dynNull
+        else:
+            result = false
+
+    proc `of`*(that: dynType): self =
+        result = this.kind == that
+
+    proc `of`*[T](that: typedesc[T]): self =
+        result = false
+
+        when T == int:
+            result = this.kind == dynInt
+        when T == float:
+            result = this.kind == dynFloat
+        when T == string:
+            result = this.kind == dynFloat
+        when T == array:
+            result = this.kind == dynArray
+        when T == object:
+            result = this.kind == dynObject
+        when T == bool:
+            result = this.kind == dynBool
+        when T == dyn:
+            result = true
+
+    #
+    # Available functions
+    #
+
     self.register(
         "join",
         proc(separator: string = ""): self =
             result = @this.join(separator) # Convert explicitly to a sequence before joining
+    )
+
+    self.register(
+        "len",
+        proc(): self =
+            result = this.toString.len
     )

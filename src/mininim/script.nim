@@ -85,7 +85,7 @@ begin msToken:
 
 begin msNode:
     method value(scope: dyn): dyn {. base .} =
-        result = dyn()
+        result = null
 
         case this.kind:
             of msNInt:

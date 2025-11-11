@@ -105,12 +105,12 @@ converter typeID*(T: typedesc): TypeID =
 converter toBool*(this: string): bool =
     result = this.len > 0
     when defined debug:
-        echo fmt "Converted [string] {this} to bool"
+        echo fmt "Converted [string] {this} to bool {$result}"
 
 converter toBool*(this: int): bool =
-    result = this > 0
+    result = this != 0
     when defined debug:
-        echo fmt "Converted [int] {$this} to bool"
+        echo fmt "Converted [int] {$this} to bool {$result}"
 
 proc `%`*(a: App): JsonNode =
     result = newJInt(cast[int](addr a))
@@ -637,7 +637,7 @@ shape Shared: @[
 ]#
 begin App:
     method init*(): void {. base, mutator .}=
-        this.config = config.deepCopy
+        this.config = deepCopy config
 
         initLock(this.store.lock)
 
