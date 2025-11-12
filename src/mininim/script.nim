@@ -453,7 +453,7 @@ begin Script:
     method parseTerm(): msNode {. base .} =
         result = this.parseAccess()
 
-        while this.current.kind == msOp and this.current.value[0] in {'*', '/', ':'}:
+        while this.current.kind == msOp and this.current.value[0] in {'*', '/'}:
             let
                 operator = this.current.value
 
