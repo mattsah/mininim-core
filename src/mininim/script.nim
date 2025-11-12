@@ -31,7 +31,7 @@ type
 
     msNK = enum
         msNInt, msNFloat, msNString, msNIdent, msNField, msNCall,
-        msNBinaryOp, msNUnaryOp, msNArray, msNKey
+        msNBinaryOp, msNUnaryOp, msNArray, msNKey, msNObject, msNPair
 
     msNode = ref object
         case kind: msNK
@@ -62,6 +62,11 @@ type
             of msNKey:
                 keyObj: msNode
                 keyExpr: msNode
+            of msNObject:
+                pairs: seq[msNode]
+            of msNPair:
+                keyName: msNode
+                pairVal: msNode
 
     Script* = ref object of Class
         tokens: seq[msToken]
@@ -118,10 +123,16 @@ begin msNode:
 
                 else:
                     raise newException(ValueError, "Invalid method")
+            of msNArray:
+                result = ~[]
+                for element in this.elements:
+                    result << element.value(scope)
+            of msNObject:
+                result = ~()
+                for pair in this.pairs:
+                    result[pair.keyName.identName] = pair.pairVal.value(scope)
             of msNField:
                 result = this.fieldObj.value(scope)[this.fieldName]
-            of msNArray:
-                result = ~this.elements.mapIt(it.value(scope))
             of msNKey:
                 result = this.keyObj.value(scope)[this.keyExpr.value(scope)]
             else:
@@ -294,9 +305,20 @@ begin Script:
                 )
                 this.consume(msWord)
 
+                if this.current.kind == msPunc and this.current.value == ":":
+                    this.consume(msPunc, ":")
+                    var
+                        value = this.parseExpr()
+
+                    result = msNode(
+                        kind: msNPair,
+                        keyName: result,
+                        pairVal: value
+                    )
+
             of msPunc:  # Array literal: [1, 2, 3]
                 if this.current.value == "[":
-                    this.consume(msPunc)
+                    this.consume(msPunc, "[")
                     var
                         elements: seq[msNode]
 
@@ -320,6 +342,35 @@ begin Script:
                 elif this.current.value == "(":
                     this.consume(msPunc, "(")
                     result = this.parseExpr()
+
+                    if result.kind == msNPair:
+                        var
+                            pairs: seq[msNode] = @[result]
+
+                        while true:
+                            if this.current.kind == msPunc:
+                                if this.current.value == ")":
+                                    break
+                                elif this.current.value == ",":
+                                    this.consume(msPunc, ",")
+
+                                    let
+                                        pair = this.parseExpr()
+
+                                    if pair.kind == msNPair:
+                                        pairs.add(pair)
+                                        continue
+
+                            raise newException(
+                                ValueError,
+                                "Shitty Colon"
+                            )
+
+                        result = msNode(
+                            kind: msNObject,
+                            pairs: pairs
+                        )
+
                     this.consume(msPunc, ")")
 
             of msOp: # Unary
@@ -402,7 +453,7 @@ begin Script:
     method parseTerm(): msNode {. base .} =
         result = this.parseAccess()
 
-        while this.current.kind == msOp and this.current.value[0] in {'*', '/'}:
+        while this.current.kind == msOp and this.current.value[0] in {'*', '/', ':'}:
             let
                 operator = this.current.value
 

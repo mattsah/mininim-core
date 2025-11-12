@@ -96,11 +96,14 @@ converter toDyn*(this: tuple): dyn =
         value = newSeq[(string, dyn)]()
     when defined debug:
         echo fmt "Converting [tuple] to dynamic value"
-    for key, item in this.fieldPairs:
-        if key != "Field" & $cur:
-            table = true
-        value.add((key, toDyn(item)))
-        inc cur
+    if this.tupleLen == 0:
+        table = true
+    else:
+        for key, item in this.fieldPairs:
+            if key != "Field" & $cur:
+                table = true
+            value.add((key, toDyn(item)))
+            inc cur
     if table:
         result = dyn(kind: dynObject, objectVal: value.toTable)
     else:
