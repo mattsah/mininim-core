@@ -51,12 +51,6 @@ var
 #[
     Converters to dyn type
 ]#
-converter toDyn*(this: Class): dyn =
-    if this == nil:
-        when defined debug:
-            echo fmt "Converting [nil] to dynamic value"
-        result = dyn(kind: dynNull)
-
 converter toDyn*(this: int): dyn =
     when defined debug:
         echo fmt "Converting [int] to dynamic value"
@@ -142,7 +136,12 @@ begin dyn:
     proc `$`*(): string # Forward declaration for debug messages
 
     converter toDyn*(): dyn =
-        result = this
+        if this == nil:
+            when defined debug:
+                echo fmt "Converting [nil] to dynamic value"
+            result = dyn(kind: dynNull)
+        else:
+            result = this
 
     converter toInt*(): int =
         when defined debug:
@@ -311,7 +310,7 @@ begin dyn:
         result = allFunctions
 
     #
-    # Equality
+    # Equality, Conditionals, Etc
     #
 
     proc `==`*(that: self): self =
@@ -330,8 +329,11 @@ begin dyn:
     proc `==`*(that: auto): self =
         result = this == toDyn(that)
 
-    proc `==`*(that: auto): self {. infix .} =
-        result = this == toDyn(that)
+    proc `and`*(that: auto): self =
+        result = toBool(this) and that
+
+    proc `or`*(that: auto): self =
+        result = toBool(this) or that
 
     #
     # Addition
