@@ -79,12 +79,12 @@ converter toDyn*(this: bool): dyn =
         echo fmt "Converting [bool] to dynamic value"
     result = dyn(kind: dynBool, boolVal: this)
 
-converter toDyn*[T, N: int](this: array[N, T]): dyn =
+converter toDyn*[N: int, T: auto](this: array[N, T]): dyn =
     when defined debug:
         echo fmt "Converting [array[{$N}, {$T}]] to dynamic value"
     result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
 
-converter toDyn*[T](this: openArray[T]): dyn =
+converter toDyn*[T: auto](this: openArray[T]): dyn =
     when defined debug:
         echo fmt "Converting [openArray[{$T}]] to dynamic value"
     result = dyn(kind: dynArray, arrayVal: this.mapIt(toDyn(it)))
@@ -99,10 +99,8 @@ converter toDyn*(this: tuple): dyn =
     for key, item in this.fieldPairs:
         if key != "Field" & $cur:
             table = true
-
         value.add((key, toDyn(item)))
         inc cur
-
     if table:
         result = dyn(kind: dynObject, objectVal: value.toTable)
     else:
@@ -111,11 +109,10 @@ converter toDyn*(this: tuple): dyn =
 #[
     Convert basically anything to a dynamic value
 ]#
-
 macro `:=`*(this: untyped, value: untyped): untyped =
     if value.kind == nnkBracket and value.len == 0:
         result = quote do:
-            var `this` = toDyn(newSeq[dyn]())
+            var `this` = dyn(kind: dynArray, arrayVal: newSeq[dyn]())
     else:
         result = quote do:
             var `this` = toDyn(`value`)
@@ -123,7 +120,7 @@ macro `:=`*(this: untyped, value: untyped): untyped =
 macro `~`*(value: untyped): dyn =
     if value.kind == nnkBracket and value.len == 0:
         result = quote do:
-            toDyn(newSeq[dyn]())
+            dyn(kind: dynArray, arrayVal: newSeq[dyn]())
     else:
         result = quote do:
             toDyn(`value`)
@@ -568,6 +565,17 @@ begin dyn:
                     raise newException(
                         ValueError,
                         fmt "Accessing '{field}' failed, value not defined"
+                    )
+            of dynArray:
+                let
+                    key = parseInt(field)
+
+                if key <= this.arrayVal.high and key >= this.arrayVal.low:
+                    result = this.arrayVal[key]
+                else:
+                    raise newException(
+                        ValueError,
+                        fmt "Accessing '{key}' failed, outside range"
                     )
 
             else:

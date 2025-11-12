@@ -1,6 +1,7 @@
 import
     mininim,
-    mininim/dynamic
+    mininim/dynamic,
+    std/parseutils
 
 export
     dynamic
@@ -30,7 +31,7 @@ type
 
     msNK = enum
         msNInt, msNFloat, msNString, msNIdent, msNField, msNCall,
-        msNBinaryOp, msNUnaryOp, msNArray
+        msNBinaryOp, msNUnaryOp, msNArray, msNKey
 
     msNode = ref object
         case kind: msNK
@@ -58,6 +59,9 @@ type
                 unaryOp: string
             of msNArray:
                 elements: seq[msNode]
+            of msNKey:
+                keyObj: msNode
+                keyExpr: msNode
 
     Script* = ref object of Class
         tokens: seq[msToken]
@@ -104,16 +108,6 @@ begin msNode:
                         result = this.left.value(scope) * this.right.value(scope)
                     of "/":
                         result = this.left.value(scope) / this.right.value(scope)
-            of msNField:
-                let
-                    value = this.fieldObj.value(scope)[this.fieldName]
-
-                if value == null:
-                    result = null
-#                    raise newException(ValueError, "Method did not return a value")
-                else:
-                    result = value
-
             of msNCall:
                 if dyn.hasFunction(this.methodName):
                     result = dyn.callFunction(
@@ -124,9 +118,12 @@ begin msNode:
 
                 else:
                     raise newException(ValueError, "Invalid method")
+            of msNField:
+                result = this.fieldObj.value(scope)[this.fieldName]
             of msNArray:
                 result = ~this.elements.mapIt(it.value(scope))
-
+            of msNKey:
+                result = this.keyObj.value(scope)[this.keyExpr.value(scope)]
             else:
                 raise newException(ValueError, "Not implemented yet")
 
@@ -343,8 +340,22 @@ begin Script:
     method parseAccess(): msNode {. base .} =
         result = this.parsePrimary()
 
-        while this.current.kind == msPunc and this.current.value[0] in {'.', '('}:
-            if this.current.value == ".":
+        while this.current.kind == msPunc and this.current.value[0] in {'.', '(', '['}:
+            if this.current.value == "[":
+                this.consume(msPunc, "[")
+
+                let
+                    key = this.parseExpr()
+
+                this.consume(msPunc, "]")
+
+                result = msNode(
+                    kind: msNKey,
+                    keyObj: result,
+                    keyExpr: key
+                )
+
+            elif this.current.value == ".":
                 this.consume(msPunc, ".")
 
                 if this.current.kind == msWord:
