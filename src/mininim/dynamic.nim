@@ -53,9 +53,9 @@ converter toDyn*(this: float): dyn =
     result = dyn(kind: dynFloat, floatVal: this)
 
 converter toDyn*(this: string): dyn =
-    var
-        intVal: int
-        floatVal: float
+#    var
+#        intVal: int
+#        floatVal: float
     when defined debug:
         echo fmt "Converting [string] to dynamic value"
     result = dyn(kind: dynString, stringVal: this)
@@ -131,21 +131,23 @@ converter toDyn*(this: tuple): dyn =
 #[
     Convert basically anything to a dynamic value
 ]#
-macro `:=`*(this: untyped, value: untyped): untyped =
-    if value.kind == nnkBracket and value.len == 0:
-        result = quote do:
-            var `this` = dyn(kind: dynArray, arrayVal: newSeq[dyn]())
-    else:
-        result = quote do:
-            var `this` = toDyn(`value`)
-
 macro `~`*(value: untyped): dyn =
     if value.kind == nnkBracket and value.len == 0:
         result = quote do:
             dyn(kind: dynArray, arrayVal: newSeq[dyn]())
+    elif value.kind == nnkBracketExpr:
+        let
+            dyn = value[0]
+            key = value[1]
+        result = quote do:
+            toDyn(`dyn`)[`key`]
     else:
         result = quote do:
             toDyn(`value`)
+
+macro `:=`*(this: untyped, value: untyped): untyped =
+    result = quote do:
+        var `this` = ~`value`
 
 #[
     Primary dyn implementation
@@ -153,6 +155,14 @@ macro `~`*(value: untyped): dyn =
 
 begin dyn:
     proc `$`*(): string # Forward declaration for debug messages
+
+    proc copy*(): dyn =
+        result = dyn(kind: this.kind)
+        case this.kind:
+            of dynObject:
+                result.objectVal = this.objectVal
+            else:
+                result = deepcopy this
 
     converter toDyn*(): dyn =
         if this == nil: # this is used for tuple member converstion when value is `nil`
@@ -242,6 +252,8 @@ begin dyn:
                 result = newSeq[self]()
             of dynArray:
                 result = this.arrayVal
+            of dynObject:
+                result = toSeq(this.objectVal.values)
             else:
                 result = @[this]
 
@@ -253,7 +265,9 @@ begin dyn:
                 result = this.objectVal
             else:
                 result = initTable[string, self]()
-                result["value"] = deepcopy this
+                result["value"] = copy this
+
+
 
     #[
         Shorthand for string conversion
@@ -271,110 +285,12 @@ begin dyn:
         result = toArray(this)
 
     #
-    # Function handling
-    #
-
-    macro register*(name: string, call: untyped): untyped {. static .} =
-        var
-            minArgc = 0
-            maxArgc = 0
-
-        let
-            this = newIdentNode("this")
-            args = newIdentNode("args")
-            inner = newIdentNode("inner")
-            cases = newNimNode(nnkCaseStmt)
-            error = newNimNode(nnkElse)
-            estmt = newStmtList()
-
-        if call.kind != nnkLambda:
-            raise newException(ValueError, "")
-
-        if call[3].kind == nnkFormalParams: # Determine min and max argument count
-            for i in 1..<call[3].len:
-                inc maxArgc
-                if call[3][i][2].kind == nnkEmpty:
-                    inc minArgc
-
-        cases.add(  # Initialize the case statement
-            quote do:
-                `args`.len
-        )
-
-        for i in minArgc..maxArgc: # Iterate and add cases to determine valid parameter count
-            let
-                branch = newNimNode(nnkOfBranch)
-                code = newStmtList()
-                call = newCall(inner)
-
-            branch.add(newIntLitNode(i))
-
-            for j in 0..<i:
-                call.add(
-                    quote do:
-                        `args`[`j`]
-                )
-
-            code.add(call)
-            branch.add(code)
-            cases.add(branch)
-
-        estmt.add( # Add our final error handling
-            quote do:
-                raise newException(ValueError, fmt "Parameter count out of range")
-        )
-
-        error.add(estmt)
-        cases.add(error)
-
-        result = quote do: # Construct the wrapped function
-            dyn.functions[`name`] = Function(
-                minArgc: `minArgc`,
-                maxArgc: `maxArgc`,
-                call: proc(`this`: dyn, `args`: seq[dyn]): dyn =
-                    let
-                        `inner` = `call`
-
-                    result = `cases`
-            )
-
-    proc hasFunction*(name: string): bool {. static .} =
-        result = allFunctions.hasKey(name)
-
-    proc callFunction*(name: string, this: self, args: seq[self]): self {. static .} =
-        when defined debug:
-            echo fmt "Calling dynamic function {name} on {$this}"
-
-        if not allFunctions.hasKey(name):
-            raise newException(ValueError, fmt "Invalid function `{name}()` called")
-
-        try:
-            result = allFunctions[name].call(this, args)
-        except ValueError:
-            raise newException(ValueError, fmt "Cannot call `{name}() with {args.len} parameters, wrong count`")
-
-    proc functions*(): var FunctionRegistry {. static .} =
-        result = allFunctions
-
-    #
     # Equality, Conditionals, Etc
     #
 
     #[
 
     ]#
-    proc `of`*(that: self): bool =
-        if that == nil:
-            if this == nil:
-                result = true
-            else:
-                result = this.kind == dynNull
-        else:
-            result = this.kind == that.kind
-
-    proc `of`*(that: dynType): bool =
-        result = this.kind == that
-
     proc `as`*[T](to: typedesc[T]): self =
         result = null
 
@@ -391,6 +307,9 @@ begin dyn:
         when T == bool:
             result = ~toBool(this)
 
+    proc `of`*(that: dynType): bool =
+        result = this.kind == that
+
     proc `of`*[T](that: typedesc[T]): bool =
         result = false
 
@@ -399,7 +318,7 @@ begin dyn:
         when T == float:
             result = this.kind == dynFloat
         when T == string:
-            result = this.kind == dynFloat
+            result = this.kind == dynString
         when T == array:
             result = this.kind == dynArray
         when T == object:
@@ -409,14 +328,35 @@ begin dyn:
         when T == dyn:
             result = true
 
-    proc `==`*(that: self): self =
-        result = dyn(kind: dynBool, boolVal: false)
+    proc `of`*(that: self): bool =
+        if that == nil:
+            if this == nil:
+                result = true
+            else:
+                result = this.kind == dynNull
+        else:
+            result = this.kind == that.kind
+
+    proc `==`*(that: self): bool =
+        result = false
 
         case this.kind:
             of dynNull:
                 case that.kind:
                     of dynNull:
-                        result.boolVal = true
+                        result = true
+                    else:
+                        discard
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        result = this.intVal == that.intVal
+                    else:
+                        discard
+            of dynString:
+                case that.kind:
+                    of dynString:
+                        result = this.stringVal == that.stringVal
                     else:
                         discard
             else:
@@ -506,7 +446,7 @@ begin dyn:
 
     proc `[]`*(key: dyn): self =
         if key of nil:
-            raise newException(ValueError, "Cannot use key null key for array/object access")
+            raise newException(ValueError, "Cannot use null key for array/object access")
 
         case this.kind:
             of dynObject:
@@ -539,7 +479,7 @@ begin dyn:
 
     proc `[]=`*(key: dyn, value: auto): void {.  .}=
         if key of nil:
-            raise newException(ValueError, "Cannot use key null key for array/object access")
+            raise newException(ValueError, "Cannot use null key for array/object access")
 
         case this.kind:
             of dynObject:
@@ -761,17 +701,147 @@ begin dyn:
         result = value
 
     #
+    # Function handling
+    #
+
+    macro register*(name: string, call: untyped): untyped {. static .} =
+        var
+            minArgc = 0
+            maxArgc = 0
+
+        let
+            this = newIdentNode("this")
+            args = newIdentNode("args")
+            decl = newNimNode(nnkProcDef)
+            ident = newIdentNode(name.strVal)
+            cases = newNimNode(nnkCaseStmt)
+            error = newNimNode(nnkElse)
+            estmt = newStmtList()
+
+        if call.kind != nnkLambda:
+            raise newException(ValueError, "")
+
+        if call[3].kind == nnkFormalParams: # Determine min and max argument count
+            for i in 1..<call[3].len:
+                inc maxArgc
+                if call[3][i][2].kind == nnkEmpty:
+                    inc minArgc
+
+        dec minArgc
+        dec maxArgc
+
+        cases.add(  # Initialize the case statement
+            quote do:
+                `args`.len
+        )
+
+        for i in minArgc..maxArgc: # Iterate and add cases to determine valid parameter count
+            let
+                branch = newNimNode(nnkOfBranch)
+                code = newStmtList()
+                call = quote do:
+                    `this`.`ident`()
+
+            branch.add(newIntLitNode(i))
+
+            for j in 0..<i:
+                call.add(
+                    quote do:
+                        `args`[`j`]
+                )
+
+            code.add(call)
+            branch.add(code)
+            cases.add(branch)
+
+        estmt.add( # Add our final error handling
+            quote do:
+                raise newException(ValueError, fmt "Parameter count out of range")
+        )
+
+        error.add(estmt)
+        cases.add(error)
+
+        for child in call:
+            decl.add(copyNimTree(child))
+
+        decl.del(0)
+        decl.insert(0, newNimNode(nnkPostfix))
+        decl[0].add(newIdentNode("*"))
+        decl[0].add(ident)
+
+        result = quote do: # Construct the wrapped function
+            `decl`
+
+            dyn.functions[`name`] = Function(
+                minArgc: `minArgc`,
+                maxArgc: `maxArgc`,
+                call: proc(`this`: dyn, `args`: seq[dyn]): dyn =
+                    result = `cases`
+            )
+
+    macro function*(call: untyped): untyped {. static .} =
+        result = quote do:
+            `call`
+        discard
+
+    proc hasFunction*(name: string): bool {. static .} =
+        result = allFunctions.hasKey(name)
+
+    proc callFunction*(name: string, this: self, args: seq[self]): self {. static .} =
+        when defined debug:
+            echo fmt "Calling dynamic function {name} on {$this}"
+
+        if not allFunctions.hasKey(name):
+            raise newException(ValueError, fmt "Invalid function `{name}()` called")
+
+        try:
+            result = allFunctions[name].call(this, args)
+        except ValueError:
+            raise newException(ValueError, fmt "Cannot call `{name}() with {args.len} parameters, wrong count`")
+
+    proc functions*(): var FunctionRegistry {. static .} =
+        result = allFunctions
+
+    #
     # Available functions
     #
 
     self.register(
-        "join",
-        proc(separator: string = ""): self =
-            result = @this.join(separator) # Convert explicitly to a sequence before joining
+        "len",
+        proc(this: self): self =
+            if this of nil:
+                result = -1
+            elif this of array:
+                result = toArray(this).len
+            elif this of object:
+                result = toObject(this).len
+            elif this of bool:
+                result = if this: 1 else: 0
+            elif this of float:
+                let
+                    value = toString(this)
+                    start = value.find('.')
+
+                result = toFloat($start & "." & $(value.len - (start + 1)))
+            else:
+                result = this.toString.len
     )
 
     self.register(
-        "len",
-        proc(): self =
-            result = this.toString.len
+        "has",
+        proc(this: self, query: self): self =
+            result = false
+
+            if this of string:
+                result = toString(this).find(query) >= 0
+            elif this of array:
+                result = toArray(this).contains(query)
+            elif this of object:
+                let
+                    concern = toObject(this)
+                if concern.hasKey(query):
+                    result = concern[query] as bool
+            else:
+                result = this == query
     )

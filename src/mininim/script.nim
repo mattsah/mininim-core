@@ -141,19 +141,7 @@ begin msNode:
 begin Script:
     method parseExpr(): msNode {. base .}
 
-    proc lex(code: string): seq[msToken] {. static .}
-
-    proc eval*(code: string, scope: dyn = ()): dyn {. static .} =
-        let
-            tokens = self.lex(code)
-            parser = self(tokens: tokens)
-
-        let
-            tree = parser.parseExpr()
-
-        result = tree.value(scope)
-
-    proc lex(code: string): seq[msToken] {. static .} =
+    proc lex*(code: string): seq[msToken] {. static .} =
         var
             i = 0
 
@@ -256,6 +244,40 @@ begin Script:
                 else:
                     discard
             inc i
+
+    proc eval*(code: string, scope: dyn = ()): dyn {. static .} =
+        let
+            tokens = self.lex(code)
+            parser = self(tokens: tokens)
+
+        let
+            tree = parser.parseExpr()
+
+        result = tree.value(scope)
+
+    proc fill*(format: string, scope: dyn = ()): dyn {. static .} =
+        var
+            head = 0
+            index = 1
+            inBlock = false
+            working = format
+
+        while index < working.len:
+            if not inBlock and working[index - 1..index] == "{{":
+                inBlock = true
+                head = index + 1
+            if inBlock and working[index - 1..index] == "}}":
+                let
+                    code = working[head..index - 2]
+                    value = Script.eval(code, scope)
+
+                inBlock = false
+                working = working[0..head - 3] & value & working[index + 1..<working.len]
+                index = head - 3 + value.toString.len
+
+            inc index
+
+        result = working
 
     method current(): msToken {. base .}=
         if
@@ -482,3 +504,5 @@ begin Script:
                 right: this.parseTerm(),
                 binaryOp: operator
             )
+
+

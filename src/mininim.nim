@@ -221,6 +221,7 @@ proc trap*[V](self: typedesc, value: V): TrappedPointer =
 ##
 
 template infix*() {. pragma .}
+template noauto*() {. pragma .}
 template static*() {. pragma .}
 template mutator*() {. pragma .}
 template abstract*() {. pragma .}
@@ -286,6 +287,8 @@ macro begin*(scope: typedesc, body: untyped) =
             if c1[4].kind == nnkPragma:
                 for i2, c2 in c1[4]:
                     if c2.kind == nnkIdent:
+                        if c2.strVal == "noauto":
+                            loc = 0
                         if c2.strVal == "static":
                             stc = true
                         if c2.strVal == "mutator":
@@ -296,7 +299,7 @@ macro begin*(scope: typedesc, body: untyped) =
                             ifx = true
 
             for i2, c2 in c1:
-                if c2.kind == nnkFormalParams:
+                if c2.kind == nnkFormalParams and loc > 0:
                     if ifx:
                         loc = c2.len
 
