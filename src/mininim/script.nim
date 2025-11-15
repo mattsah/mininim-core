@@ -113,6 +113,10 @@ begin msNode:
                         result = this.left.value(scope) * this.right.value(scope)
                     of "/":
                         result = this.left.value(scope) / this.right.value(scope)
+                    of "==":
+                        result = this.left.value(scope) == this.right.value(scope)
+                    of "!=":
+                        result = this.left.value(scope) != this.right.value(scope)
             of msNCall:
                 if dyn.hasFunction(this.methodName):
                     result = dyn.callFunction(
@@ -156,8 +160,13 @@ begin Script:
                 #[
                     Symbolic Operators
                 ]#
-                of '+', '-', '*', '/', '=', '!':
+                of '+', '-', '*', '/':
                     result.add(msToken(kind: msOp, opVal: $code[i]))
+
+                of '=', '!':
+                    if i+1 < code.len and code[i+1] in {'='}:
+                        result.add(msToken(kind: msOp, opVal: $code[i..i+1]))
+                        inc i
 
                 #[
                     Numbers
@@ -347,12 +356,15 @@ begin Script:
                     # Parse array elements
                     if this.current.kind != msPunc or this.current.value != "]":
                         while true:
-                            elements.add(this.parseExpr())
+                            var
+                                value = this.parseExpr()
+
+                            elements.add(value)
 
                             if this.current.kind == msPunc and this.current.value != ",":
                                 break
 
-                            this.consume(msPunc)
+                            this.consume(msPunc, ",")
 
                     this.consume(msPunc, "]")
 
@@ -363,6 +375,7 @@ begin Script:
 
                 elif this.current.value == "(":
                     this.consume(msPunc, "(")
+
                     result = this.parseExpr()
 
                     if result.kind == msNPair:
@@ -475,7 +488,7 @@ begin Script:
     method parseTerm(): msNode {. base .} =
         result = this.parseAccess()
 
-        while this.current.kind == msOp and this.current.value[0] in {'*', '/'}:
+        while this.current.kind == msOp and this.current.value in ["*", "/"]:
             let
                 operator = this.current.value
 
@@ -492,7 +505,7 @@ begin Script:
     method parseExpr(): msNode {. base .}=
         result = this.parseTerm()
 
-        while this.current.kind == msOp and this.current.value[0] in {'+', '-', '&', '|'}:
+        while this.current.kind == msOp and this.current.value in ["+", "-", "&", "|", "==", "!="]:
             let
                 operator = this.current.value
 
