@@ -267,7 +267,9 @@ begin dyn:
                 result = initTable[string, self]()
                 result["value"] = copy this
 
-
+    #
+    # Misc common syntax handers
+    #
 
     #[
         Shorthand for string conversion
@@ -283,6 +285,23 @@ begin dyn:
     ]#
     proc `@`*(): seq[self] =
         result = toArray(this)
+
+    #[
+        Backwards index handler
+    ]#
+
+    proc `^`*(): int =
+        case this.kind:
+            of dynArray:
+                result = this.arrayVal.len - 1
+            of dyNString:
+                result = this.stringVal.len - 1
+            else:
+                result = 0
+
+    template `..^`*(start: untyped): untyped {. infix .} =
+        start .. ^this
+
 
     #
     # Equality, Conditionals, Etc
@@ -461,11 +480,24 @@ begin dyn:
                         fmt "Accessing '{key}' failed, value not defined"
                     )
             of dynArray:
-                let
+                var
                     key = toInt(key)
-
+                if key < 0:
+                    key = this.arrayVal.len - key
                 if key <= this.arrayVal.high and key >= this.arrayVal.low:
                     result = this.arrayVal[key]
+                else:
+                    raise newException(
+                        ValueError,
+                        fmt "Accessing '{key}' failed, outside range"
+                    )
+            of dynString:
+                var
+                    key = toInt(key)
+                if key < 0:
+                    key = this.stringVal.len - key
+                if key <= this.stringVal.high and key >= this.stringVal.low:
+                    result = $this.stringVal[key]
                 else:
                     raise newException(
                         ValueError,
@@ -474,7 +506,7 @@ begin dyn:
             else:
                 raise newException(
                     ValueError,
-                    fmt "Cannot read key/field '{key}' from non-array/object dynamic value"
+                    fmt "Cannot read key/field '{key}' from scalar dynamic value"
                 )
 
     proc `[]=`*(key: dyn, value: auto): void {.  .}=
