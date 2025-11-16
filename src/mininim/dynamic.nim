@@ -29,10 +29,6 @@ type
         minArgc*: int
         maxArgc*: int
         call*: FunctionWrapper
-
-const
-    empty* = []
-
 var
     allFunctions = FunctionRegistry()
 
@@ -52,20 +48,6 @@ converter toDyn*(this: float): dyn =
         echo fmt "Converting [float] to dynamic value"
     result = dyn(kind: dynFloat, floatVal: this)
 
-converter toDyn*(this: string): dyn =
-#    var
-#        intVal: int
-#        floatVal: float
-    when defined debug:
-        echo fmt "Converting [string] to dynamic value"
-    result = dyn(kind: dynString, stringVal: this)
-#    if this.len > 0 and this.parseInt(intVal) == this.len:
-#        result = dyn(kind: dynInt, intVal: intVal)
-#    elif this.len > 0 and this.parseFloat(floatVal) == this.len:
-#        result = dyn(kind: dynFloat, floatVal: floatVal)
-#    else:
-#        result = dyn(kind: dynString, stringVal: this)
-
 converter toDyn*(this: bool): dyn =
     when defined debug:
         echo fmt "Converting [bool] to dynamic value"
@@ -74,13 +56,10 @@ converter toDyn*(this: bool): dyn =
         boolVal: this
     )
 
-converter toDyn*[N: int, T: auto](this: array[N, T]): dyn =
+converter toDyn*(this: string): dyn =
     when defined debug:
-        echo fmt "Converting [array[{$N}, {$T}]] to dynamic value"
-    result = dyn(
-        kind: dynArray,
-        arrayVal: this.mapIt(toDyn(it))
-    )
+        echo fmt "Converting [string] to dynamic value"
+    result = dyn(kind: dynString, stringVal: this)
 
 converter toDyn*[T: auto](this: openArray[T]): dyn =
     when defined debug:
@@ -90,25 +69,21 @@ converter toDyn*[T: auto](this: openArray[T]): dyn =
         arrayVal: this.mapIt(toDyn(it))
     )
 
-converter toDyn*[K: auto, T: auto](this: Table[K, T]): dyn =
+converter toDyn*[T: openArray](this: T): dyn =
     when defined debug:
-        echo fmt "Converting [Table[{$K}, {$T}]] to dynamic value"
-    var
-        value = initTable[string, dyn]()
-    for key, item in this.pairs:
-        value[$key] = toDyn(item)
+        echo fmt "Converting [string] to dynamic value"
     result = dyn(
-        kind: dynObject,
-        objectVal: value
+        kind: dynArray,
+        arrayVal: newSeq[dyn]()
     )
 
 converter toDyn*(this: tuple): dyn =
+    when defined debug:
+        echo fmt "Converting [tuple] to dynamic value"
     var
         cur = 0
         table = false
         value = newSeq[(string, dyn)]()
-    when defined debug:
-        echo fmt "Converting [tuple] to dynamic value"
     if this.tupleLen == 0:
         table = true
     else:
@@ -128,14 +103,35 @@ converter toDyn*(this: tuple): dyn =
             arrayVal: value.mapIt(it[1])
         )
 
+converter toDyn*[K: auto, T: auto](this: Table[K, T]): dyn =
+    when defined debug:
+        echo fmt "Converting [Table[{$K}, {$T}]] to dynamic value"
+    var
+        value = initTable[string, dyn]()
+    for key, item in this.pairs:
+        value[$key] = toDyn(item)
+    result = dyn(
+        kind: dynObject,
+        objectVal: value
+    )
+
 #[
     Convert basically anything to a dynamic value
 ]#
 macro `~`*(value: untyped): dyn =
-    if value.kind == nnkBracket and value.len == 0:
+    var
+        arrayVal: NimNode
+
+    if value.kind == nnkBracket:
+        arrayVal = value
+    elif value.kind == nnkPrefix and value[0].strVal == "@" and value[1].kind == nnkBracket:
+        arrayVal = value[1]
+
+    if arrayVal != nil and arrayVal.len == 0:
         result = quote do:
             dyn(kind: dynArray, arrayVal: newSeq[dyn]())
     elif value.kind == nnkBracketExpr:
+        echo value.treeRepr
         let
             dyn = value[0]
             key = value[1]
@@ -145,9 +141,11 @@ macro `~`*(value: untyped): dyn =
         result = quote do:
             toDyn(`value`)
 
-macro `:=`*(this: untyped, value: untyped): untyped =
-    result = quote do:
-        var `this` = ~`value`
+template `:=`*(this: untyped, value: untyped): untyped =
+    var this = ~value
+
+template `~@`*(value: untyped): untyped =
+    ~ value
 
 #[
     Primary dyn implementation
@@ -359,29 +357,33 @@ begin dyn:
     proc `==`*(that: self): bool =
         result = false
 
-        case this.kind:
-            of dynNull:
-                case that.kind:
-                    of dynNull:
-                        result = true
-                    else:
-                        discard
-            of dynInt:
-                case that.kind:
-                    of dynInt:
-                        result = this.intVal == that.intVal
-                    else:
-                        discard
-            of dynString:
-                case that.kind:
-                    of dynString:
-                        result = this.stringVal == that.stringVal
-                    else:
-                        discard
-            else:
-                discard
+        if this of nil:
+            case that.kind:
+                of dynNull:
+                    result = true
+                else:
+                    discard
+        else:
+            case this.kind:
+                of dynInt:
+                    case that.kind:
+                        of dynInt:
+                            result = this.intVal == that.intVal
+                        else:
+                            discard
+                of dynString:
+                    case that.kind:
+                        of dynString:
+                            result = this.stringVal == that.stringVal
+                        else:
+                            discard
+                else:
+                    discard
 
     proc `==`*(that: auto): bool =
+        result = this == toDyn(that)
+
+    proc `==`*(that: auto): bool {. infix .}=
         result = this == toDyn(that)
 
     proc `and`*(that: auto): bool =
