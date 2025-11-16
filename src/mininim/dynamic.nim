@@ -38,6 +38,11 @@ template null*(): dyn =
 #[
     Converters to dyn type
 ]#
+converter toDyn*(this: typeof(nil)): dyn =
+    when defined debug:
+        echo fmt "Converting [nil] to dynamic value"
+    result = dyn(kind: dynNull)
+
 converter toDyn*(this: int): dyn =
     when defined debug:
         echo fmt "Converting [int] to dynamic value"
@@ -152,7 +157,64 @@ template `~@`*(value: untyped): untyped =
 ]#
 
 begin dyn:
+    #
+    # Forward declare for dollar (avoids ambiguous conversion)
+    #
+
     proc `$`*(): string # Forward declaration for debug messages
+
+    #
+    # Basic type checking and conversion
+    #
+
+    #[
+
+    ]#
+    proc `as`*[T](to: typedesc[T]): self =
+        result = null
+
+        when T == int:
+            result = ~toInt(this)
+        when T == float:
+            result = ~toFloat(this)
+        when T == string:
+            result = ~toString(this)
+        when T == array:
+            result = ~toArray(this)
+        when T == object:
+            result = ~toObject(this)
+        when T == bool:
+            result = ~toBool(this)
+
+    proc `of`*(that: typeof(nil)): bool =
+        if this == nil:
+            result = true
+        else:
+            result = this.kind == dynNull
+
+    proc `of`*[T](that: typedesc[T]): bool =
+        result = false
+
+        when T == int:
+            result = this.kind == dynInt
+        when T == float:
+            result = this.kind == dynFloat
+        when T == string:
+            result = this.kind == dynString
+        when T == array:
+            result = this.kind == dynArray
+        when T == object:
+            result = this.kind == dynObject
+        when T == bool:
+            result = this.kind == dynBool
+        when T == dyn:
+            result = true
+
+    proc `of`*(that: dynType): bool =
+        result = this.kind == that
+
+    proc `of`*(that: self): bool =
+        result = this.kind == that.kind
 
     proc copy*(): dyn =
         result = dyn(kind: this.kind)
@@ -162,11 +224,13 @@ begin dyn:
             else:
                 result = deepcopy this
 
+    #
+    # Converters to other types
+    #
+
     converter toDyn*(): dyn =
-        if this == nil: # this is used for tuple member converstion when value is `nil`
-            when defined debug:
-                echo fmt "Converting [nil] to dynamic value"
-            result = dyn(kind: dynNull)
+        if this == nil:
+            result = toDyn(nil)
         else:
             result = this
 
@@ -201,7 +265,7 @@ begin dyn:
     converter toString*(): string =
         when defined debug:
             echo fmt "Converting dynamic value [{this.kind}] to string"
-        if this == nil:
+        if this of nil:
             result = "null"
         else:
             case this.kind:
@@ -217,13 +281,13 @@ begin dyn:
                     result = $this.objectVal
                 of dynBool:
                     result = if this.boolVal: "true" else: "false"
-                of dynNull:
-                    result = "null"
+                else:
+                    discard
 
     converter toBool*(): bool =
         when defined debug:
             echo fmt "Converting dynamic value [{this.kind}] to bool"
-        if this == nil:
+        if this of nil:
             return false
         else:
             case this.kind:
@@ -239,21 +303,22 @@ begin dyn:
                     result = this.objectVal.len > 0
                 of dynBool:
                     result = this.boolVal
-                of dynNull:
-                    result = false
+                else:
+                    discard
 
     converter toArray*(): seq[self] =
         when defined debug:
             echo fmt "Converting dynamic value [{this.kind}] to array (sequence)"
-        case this.kind:
-            of dynNull:
-                result = newSeq[self]()
-            of dynArray:
-                result = this.arrayVal
-            of dynObject:
-                result = toSeq(this.objectVal.values)
-            else:
-                result = @[this]
+        if this of nil:
+            result = newSeq[self]()
+        else:
+            case this.kind:
+                of dynArray:
+                    result = this.arrayVal
+                of dynObject:
+                    result = toSeq(this.objectVal.values)
+                else:
+                    result = @[this]
 
     converter toObject*(): Table[string, self] =
         when defined debug:
@@ -266,14 +331,18 @@ begin dyn:
                 result["value"] = copy this
 
     #
-    # Misc common syntax handers
+    # Syntax and helpers
+    #
+
+    #
+    # Misc common syntax, sugar, and accessors
     #
 
     #[
         Shorthand for string conversion
     ]#
     proc `$`*(): string =
-        if this == nil:
+        if this == nil: # Handled explicitly as you can't pass along null ref
             result = "null"
         else:
             result = toString(this)
@@ -282,7 +351,10 @@ begin dyn:
         Shorthand for sequence conversion
     ]#
     proc `@`*(): seq[self] =
-        result = toArray(this)
+        if this == nil: # Handled explicitly as you can't pass along null ref
+            result = newSeq[self]()
+        else:
+            result = toArray(this)
 
     #[
         Backwards index handler
@@ -300,170 +372,9 @@ begin dyn:
     template `..^`*(start: untyped): untyped {. infix .} =
         start .. ^this
 
-
-    #
-    # Equality, Conditionals, Etc
-    #
-
     #[
-
+        Array Access
     ]#
-    proc `as`*[T](to: typedesc[T]): self =
-        result = null
-
-        when T == int:
-            result = ~toInt(this)
-        when T == float:
-            result = ~toFloat(this)
-        when T == string:
-            result = ~toString(this)
-        when T == array:
-            result = ~toArray(this)
-        when T == object:
-            result = ~toObject(this)
-        when T == bool:
-            result = ~toBool(this)
-
-    proc `of`*(that: dynType): bool =
-        result = this.kind == that
-
-    proc `of`*[T](that: typedesc[T]): bool =
-        result = false
-
-        when T == int:
-            result = this.kind == dynInt
-        when T == float:
-            result = this.kind == dynFloat
-        when T == string:
-            result = this.kind == dynString
-        when T == array:
-            result = this.kind == dynArray
-        when T == object:
-            result = this.kind == dynObject
-        when T == bool:
-            result = this.kind == dynBool
-        when T == dyn:
-            result = true
-
-    proc `of`*(that: self): bool =
-        if that == nil:
-            if this == nil:
-                result = true
-            else:
-                result = this.kind == dynNull
-        else:
-            result = this.kind == that.kind
-
-    proc `==`*(that: self): bool =
-        result = false
-
-        if this of nil:
-            case that.kind:
-                of dynNull:
-                    result = true
-                else:
-                    discard
-        else:
-            case this.kind:
-                of dynInt:
-                    case that.kind:
-                        of dynInt:
-                            result = this.intVal == that.intVal
-                        else:
-                            discard
-                of dynString:
-                    case that.kind:
-                        of dynString:
-                            result = this.stringVal == that.stringVal
-                        else:
-                            discard
-                else:
-                    discard
-
-    proc `==`*(that: auto): bool =
-        result = this == toDyn(that)
-
-    proc `==`*(that: auto): bool {. infix .}=
-        result = this == toDyn(that)
-
-    proc `and`*(that: auto): bool =
-        result = toBool(this) and that # convert known dyn value to force second if needed
-
-    proc `or`*(that: auto): bool =
-        result = toBool(this) or that # convert known dyn value to force second if needed
-
-    proc `not`*(): bool =
-        if this of nil:
-            result = true
-        else:
-            case this.kind:
-                of dynBool: # optimize for bools directly
-                    result = this.boolVal
-                else: # retain toBool centralized logic for all others
-                    result = not toBool(this)
-
-    #
-    # Mutable Operators and Access
-    #
-
-    proc `<<`*(): self =
-        case this.kind:
-            of dynArray:
-                if this.arrayVal.len > 0:
-                    result = deepcopy this.arrayVal[0]
-                    this.arrayVal = this.arrayVal[1..^1]
-
-                    if this.arrayVal.len == 0:
-                        this.kind = dynNull
-            else:
-                result = deepcopy this
-                this.kind = dynNull
-
-
-    proc `>>`*(): self =
-        case this.kind:
-            of dynArray:
-                if this.arrayVal.len > 0:
-                    result = this.arrayVal.pop()
-
-                    if this.arrayVal.len == 0:
-                        this.kind = dynNull
-            else:
-                result = deepcopy this
-                this.kind = dynNull
-
-    proc `<<`*(that: self): void {. mutator .}=
-        if this of nil:
-            this = null
-        if not(that of nil):
-            case this.kind:
-                of dynArray:
-                    this.arrayVal.add(<< that)
-                else:
-                    let
-                        original = deepcopy this
-                    this.kind = dynArray
-                    this.arrayVal = newSeq[self]()
-                    if original.kind != dynNull:
-                        this << original
-                    this << that
-
-    proc `>>`*(that: var self): void =
-        if that of nil:
-            that = null
-
-        if not(this of nil):
-            case that.kind:
-                of dynArray:
-                    that.arrayVal.insert(>> this, 0)
-                else:
-                    let
-                        original = deepcopy that
-                    that.kind = dynArray
-                    that.arrayVal = newSeq[self]()
-                    if original.kind != dynNull:
-                        original >> that
-                    this >> that
 
     proc `[]`*(key: dyn): self =
         if key of nil:
@@ -545,6 +456,10 @@ begin dyn:
                     fmt "Cannot assign property to non object/array data"
                 )
 
+    #[
+        Dot notations
+    ]#
+
     template `.`*(field: untyped): self =
         this[astToStr(field)]
 
@@ -559,6 +474,150 @@ begin dyn:
             self.callFunction(key, this, @args)
         else:
             this.call
+
+    #
+    # Equality and boolean operations
+    #
+
+    proc `==`*(that: self): bool =
+        result = false
+
+        if this of nil:
+            result = that.kind == dynNull
+        else:
+            case this.kind:
+                of dynInt:
+                    case that.kind:
+                        of dynInt:
+                            result = this.intVal == that.intVal
+                        else:
+                            discard
+                of dynString:
+                    case that.kind:
+                        of dynString:
+                            result = this.stringVal == that.stringVal
+                        else:
+                            discard
+                else:
+                    discard
+
+    proc `==`*(that: auto): bool =
+        result = this == toDyn(that)
+
+    proc `==`*(that: auto): bool {. infix .}=
+        result = this == toDyn(that)
+
+    proc `!=`*(that: self): bool =
+        result = false
+
+        if this of nil:
+            result = that.kind != dynNull
+        else:
+            case this.kind:
+                of dynInt:
+                    case that.kind:
+                        of dynInt:
+                            result = this.intVal != that.intVal
+                        else:
+                            discard
+                of dynString:
+                    case that.kind:
+                        of dynString:
+                            result = this.stringVal != that.stringVal
+                        else:
+                            discard
+                else:
+                    discard
+
+    proc `!=`*(that: auto): bool =
+        result = this != toDyn(that)
+
+    proc `!=`*(that: auto): bool {. infix .}=
+        result = this != toDyn(that)
+
+    proc `and`*(that: auto): bool =
+        if this of nil:
+            result = toBool(null) and that
+        else:
+            result = toBool(this) and that # convert known dyn value to force second if needed
+
+    proc `or`*(that: auto): bool =
+        if this of nil:
+            result = toBool(null) or that
+        else:
+            result = toBool(this) or that # convert known dyn value to force second if needed
+
+    proc `not`*(): bool =
+        if this of nil:
+            result = true
+        else:
+            case this.kind:
+                of dynBool: # optimize for bools directly
+                    result = this.boolVal
+                else: # retain toBool centralized logic for all others
+                    result = not toBool(this)
+
+    #
+    # Mutation operators (needs to come before other operators, as they may be used by them)
+    #
+
+    proc `<<`*(): self =
+        case this.kind:
+            of dynArray:
+                if this.arrayVal.len > 0:
+                    result = deepcopy this.arrayVal[0]
+                    this.arrayVal = this.arrayVal[1..^1]
+
+                    if this.arrayVal.len == 0:
+                        this.kind = dynNull
+            else:
+                result = deepcopy this
+                this.kind = dynNull
+
+
+    proc `>>`*(): self =
+        case this.kind:
+            of dynArray:
+                if this.arrayVal.len > 0:
+                    result = this.arrayVal.pop()
+
+                    if this.arrayVal.len == 0:
+                        this.kind = dynNull
+            else:
+                result = deepcopy this
+                this.kind = dynNull
+
+    proc `<<`*(that: self): void {. mutator .}=
+        if this of nil:
+            this = null
+        if not(that of nil):
+            case this.kind:
+                of dynArray:
+                    this.arrayVal.add(<< that)
+                else:
+                    let
+                        original = deepcopy this
+                    this.kind = dynArray
+                    this.arrayVal = newSeq[self]()
+                    if original.kind != dynNull:
+                        this << original
+                    this << that
+
+    proc `>>`*(that: var self): void =
+        if that of nil:
+            that = null
+        if not(this of nil):
+            case that.kind:
+                of dynArray:
+                    that.arrayVal.insert(>> this, 0)
+                else:
+                    let
+                        original = deepcopy that
+                    that.kind = dynArray
+                    that.arrayVal = newSeq[self]()
+                    if original.kind != dynNull:
+                        original >> that
+                    this >> that
 
     #
     # Addition
