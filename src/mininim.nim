@@ -1,7 +1,6 @@
 import
     std/sets,
     std/json,
-    std/sugar,
     std/macros,
     std/tables,
     std/marshal,
@@ -11,6 +10,7 @@ import
     std/strformat,
     std/algorithm,
     std/strutils,
+    std/strtabs,
     std/options,
     std/locks,
     std/os
@@ -18,7 +18,6 @@ import
 export
     sets,
     json,
-    sugar,
     macros,
     tables,
     marshal,
@@ -28,6 +27,7 @@ export
     strformat,
     algorithm,
     strutils,
+    strtabs,
     options,
     locks,
     os
@@ -36,33 +36,27 @@ type
     TypeID* = uint16
 
     Class* {. inheritable .} = ref object
-    Closure* = distinct auto
 
-    TrappedPointer* = ref object
-        data: pointer
-        name: string
-        size: int
-
-    InitHook = proc(): void {. closure, gcsafe .}
-    TrapHook = proc(this: Facet): TrappedPointer {. nimcall .}
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     Storage* = object
         instances*: Table[TypeId, ref RootObj]
         lock*: Lock
 
+    InitHook = proc(): void {. closure, gcsafe .}
+
     App* = ref object of Class
         config*: Config
-        store*: Storage
+        storage*: Storage
 
     Config* = ref object of Class
-        data*: seq[Facet]
+        data: seq[Facet]
 
     Facet* = ref object of Class
         app*: App
+        call*: pointer
         class*: TypeID
         scope*: TypeID
-        call*: TrappedPointer
 
     Hook* = ref object of Facet
         init*: bool = false
@@ -86,10 +80,10 @@ var
     facetNodes {. compileTime .} = newSeq[NimNode]()
 
 let
-    config* = Config()
+    config: Config = Config()
 
 #[
-    Converters
+    Converters and syntactic sugar
 ]#
 converter typeID*(T: typedesc): TypeID =
     const id = nextTypeID.value
@@ -124,8 +118,20 @@ proc `%`*(t: tuple): JsonNode =
     for k, v in t.fieldPairs():
         result[k] = % v
 
+proc `%`*(p: proc): JsonNode =
+    result = newJString("<proc>")
+
 proc type*(self: typedesc): TypeID =
     result = self.typeID
+
+#macro `=>`*(p: typedesc[proc], body: untyped): proc =
+#    let
+#        impl = p.getTypeImpl[^1].getTypeImpl.copyNimTree
+#
+#    result = newProc(body = newStmtList(body[0..^1]))
+#
+#    result.params = impl[0]
+#    result.pragma = impl[1]
 
 #[
     Constructor
@@ -134,7 +140,7 @@ proc type*(self: typedesc): TypeID =
 proc init*(this: auto) =
     discard
 
-macro init*(self: typedesc, args: varargs[untyped]): untyped =
+macro init*[T](self: typedesc[T], args: varargs[untyped]): T =
     if args.len > 0:
         result = quote do:
             block:
@@ -147,74 +153,6 @@ macro init*(self: typedesc, args: varargs[untyped]): untyped =
                 var this = system.new(`self`)
                 this.init()
                 this
-
-##
-##    Class definitions
-##
-
-
-
-#[
-    Get the typed/casted pointer back as for a given TrappedPointer
-]#
-proc get*(self: typedesc, this: TrappedPointer): ptr self {. gcsafe .} =
-#    if $T != this.name:
-#        raise newException(CatchableError, "Type mismatch: expected one of " & this.name & ", got " & $T)
-#    if this.kind != Closure and sizeof(T) != this.size:
-#        raise newException(CatchableError, "Size mismatch: expected " & $this.size & ", got " & $sizeof(T))
-
-    # Handle cloosure
-
-    result = cast[ptr self](this.data)
-
-#[
-    Get the typed/casted dereferenced pointer back for a given TrappedPointer
-]#
-proc value*(self: typedesc, this: TrappedPointer): self {. gcsafe .}=
-    let
-        p = self.get(this)
-
-    when defined(debug):
-        if p == nil:
-            echo fmt "missing[{align($this.size, 3, '0')}]: {this.name} @ {$cast[int](this.data)}"
-
-    when self is proc and sizeof(self) > sizeof(int):
-        result = default(self)
-
-        copyMem(addr result, p, sizeof(self))
-
-    result = cast[self](p[])
-
-    when defined(debug):
-        echo fmt "secured[{align($this.size, 3, '0')}]: {this.name} @ {$cast[int](this.data)}"
-
-#[
-    Trap a variable's raw pointer (including closures) and get a TrappedPointer in its place
-]#
-proc trap*[V](self: typedesc, value: V): TrappedPointer =
-    var
-        head: pointer
-
-    let
-        name = name(V)
-        size = sizeof(V)
-
-    when V is not ref:
-        head = alloc(size)
-
-        copyMem(head, unsafeAddr value, size)
-
-    else:
-        head = addr value
-
-    result = TrappedPointer(
-        data: head,
-        name: name,
-        size: size,
-    )
-
-    when defined(debug):
-        echo fmt "trapped[{align($result.size, 3, '0')}]: {result.name} @ {$cast[int](result.data)}"
 
 ##
 ##    Class definitions
@@ -441,16 +379,26 @@ macro resolve(facet: untyped): untyped =
     let
         target = facet[0].strVal
         currentPlan = facetPlans[high facetPlans]
+        facetObjectName = newIdentNode("facet" & $currentPlan.index)
 
     var
         callNode: NimNode
 
-    # Check if current facet has a call and remove corresponding node from property and store
+    #
+    # Cleanup:
+    # - Check if current facet has a call and remove corresponding node from property and store
+    #
 
     for i, node in facetNodes[currentPlan.index]:
         if node.kind == nnkExprColonExpr and node[0].strVal == "call":
             callNode = node[1]
             facet.del(i)
+
+    result.add(
+        quote do:
+            let
+                `facetObjectName` = `facet`
+    )
 
     for facetPlan in facetPlans:
         #[
@@ -481,8 +429,9 @@ macro resolve(facet: untyped): untyped =
 
     if callNode != nil and currentPlan.class != Hook:
         let
-            this = newIdentNode("this")
-            call = talkTree(
+            thisReference = newIdentNode("this")
+            facetCallName = newIdentNode("facet" & $currentPlan.index & "call")
+            facetCode = talkTree(
                 callNode,
                 proc(node: NimNode, ctx: NimNode): NimNode =
                     result = copyNimNode(node)
@@ -495,18 +444,17 @@ macro resolve(facet: untyped): untyped =
                                 result = newIdentNode(currentPlan.realm)
             )
 
-        facet.insert(1, newColonExpr(
-            newIdentNode("call"),
+        result.add(
             quote do:
-                TrapHook.trap(
-                    proc(`this`: Facet): TrappedPointer =
-                        result = Closure.trap(`call`)
-                )
-        ))
+                let `facetCallName` = block:
+                    let `thisReference` {. used .} = `facetObjectName`; `facetCode`
+
+                `facetObjectName`.call = addr `facetCallName`
+        )
 
     result.add(
         quote do:
-            config.add(`facet`)
+            Config.add(`facetObjectName`)
     )
 
 #[
@@ -539,10 +487,6 @@ macro shape*(scope: typedesc, body: untyped): untyped =
         if facet != nil:
             class = facet[0]
 
-            let
-                target = scope.strVal
-                entry = copyNimTree(body)
-
             inc count
 
             facet.insert(1, newColonExpr(
@@ -569,22 +513,19 @@ macro shape*(scope: typedesc, body: untyped): untyped =
                             index: `facetNodeIndex`     # The location of the facet's NimNode in facetNodes
                         ))
 
-                    resolve(`facet`)
+                    mininim.resolve(`facet`)
             )
 
     when defined(debug):
         echo "Loading shape for: ", scope.strVal, " (", count ," Facets)"
 
-##
-##    Class definitions
-##
-
 #[
 
 ]#
+
 begin Facet:
-    proc `[]`*(T: typedesc): T =
-        result = T.value(this.call)
+    template `[]`*(self: typedesc): untyped =
+        cast[self](cast[ptr self](this.call)[])
 
     proc matches*(class: typedesc, query: tuple = ()): bool =
         result = true
@@ -604,11 +545,11 @@ begin Facet:
 
 ]#
 begin Config:
-    method add*(facet: Facet): void {. base .}=
-        this.data.add(facet)
+    proc add*(facet: Facet): void {. static .}=
+        config.data.add(facet)
 
-    method len*(): int {. base .} =
-        result = this.data.len()
+    proc len*(): int {. static .} =
+        result = config.data.len()
 
     proc findAll*[T](class: typedesc[T], query: tuple = ()): seq[T] =
         for facet in this.data:
@@ -639,18 +580,15 @@ shape Shared: @[
 
 ]#
 begin App:
-    method init*(): void {. base, mutator .}=
-        this.config = deepCopy config
+    method init*(): void {. base .} =
+        this.config = config
 
-        initLock(this.store.lock)
+        initLock(this.storage.lock)
 
-        for facet in this.config.data:
+        for facet in this.config.findAll(Facet):
             facet.app = this
-
-            if facet.call != nil:
-                facet.call = TrapHook.value(facet.call)(facet)
 
         for hook in this.config.findAll(Hook, (init: true)):
             for facet in this.config.findAll(Facet, (class: hook.scope)):
                 echo fmt "loading[{align($facet.class, 3, '0')}]: on facet scope {$facet.scope}"
-                InitHook.value(facet.call)()
+                facet[InitHook]()

@@ -34,18 +34,18 @@ begin App:
             delegate = this.config.findOne(Delegate, (scope: target.TypeID))
             shared = this.config.findOne(Shared, (scope: target.TypeID))
 
-        withLock this.store.lock:
-            if shared != nil and this.store.instances.hasKey(target.TypeID):
-                    result = cast[T](this.store.instances[target.TypeID])
+        withLock this.storage.lock:
+            if shared != nil and this.storage.instances.hasKey(target.TypeID):
+                    result = cast[T](this.storage.instances[target.TypeID])
 
             else:
                 if delegate != nil:
-                    result = DelegateHook[T].value(delegate.call)()
+                    result = delegate[DelegateHook[T]]()
                 else:
                     result = T.init()
 
                 if shared != nil:
-                    this.store.instances[target.TypeID] = cast[RootRef](result)
+                    this.storage.instances[target.TypeID] = cast[RootRef](result)
 
                 when defined(debug):
                     echo fmt "created[{align($T.typeID, 3, '0')}]: new instance of '{$T}'"
