@@ -136,7 +136,6 @@ macro `~`*(value: untyped): dyn =
         result = quote do:
             dyn(kind: dynArray, arrayVal: newSeq[dyn]())
     elif value.kind == nnkBracketExpr:
-        echo value.treeRepr
         let
             dyn = value[0]
             key = value[1]
@@ -422,7 +421,7 @@ begin dyn:
                     fmt "Cannot read key/field '{key}' from scalar dynamic value"
                 )
 
-    proc `[]=`*(key: dyn, value: auto): void {.  .}=
+    proc `[]=`*(key: dyn, value: auto): void =
         if key of nil:
             raise newException(ValueError, "Cannot use null key for array/object access")
 
