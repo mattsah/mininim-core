@@ -5,7 +5,7 @@ type
     Builder* = ref object of Facet
 
     Delegate* = ref object of Facet
-    DelegateHook*[T] = proc(): T {. closure .}
+    DelegateHook*[shape] = proc(): shape
 
 #[
     Can be extended to provide basic buld functionality
@@ -23,8 +23,10 @@ begin Delegate:
 
 shape Delegate: @[
     Hook(
-        call: proc(): shape {. closure .}=
-            result = shape.build(this.app)
+        call: DelegateHook as (
+            block:
+                result = shape.build(this.app)
+        )
     )
 ]
 
@@ -51,7 +53,7 @@ begin App:
                     echo fmt "created[{align($T.typeID, 3, '0')}]: new instance of '{$T}'"
 
     proc build(app: App = nil): self {. static .} =
-        return self.init()
+        result = self.init()
 
 shape App: @[
     Delegate()

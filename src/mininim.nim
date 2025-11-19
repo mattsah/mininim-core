@@ -64,7 +64,6 @@ type
     Shared* = ref object of Facet
 
     Plan* = tuple[
-        realm: string,
         scope: TypeID,
         class: TypeID,
         index: int
@@ -106,6 +105,18 @@ converter toBool*(this: int): bool =
     when defined debug:
         echo fmt "Converted [int] {$this} to bool {$result}"
 
+#[
+    Recurisvely walk an entire NimNode's treee structure and recreate it.  The resulting TreeCall
+    can either copy the node (with modificaitons) or create a totally new one in its place.  It
+    can use the context (ctx) to look to the parent node and its siblings as well.
+]#
+proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
+    result = call(node, ctx)
+
+    if result.len == 0 and result.kind == node.kind:
+        for i, child in node:
+            result.add(talkTree(child, call, node))
+
 proc `%`*(a: App): JsonNode =
     result = newJInt(cast[int](addr a))
 
@@ -124,35 +135,57 @@ proc `%`*(p: proc): JsonNode =
 proc type*(self: typedesc): TypeID =
     result = self.typeID
 
-#macro `=>`*(p: typedesc[proc], body: untyped): proc =
-#    let
-#        impl = p.getTypeImpl[^1].getTypeImpl.copyNimTree
-#
-#    result = newProc(body = newStmtList(body[0..^1]))
-#
-#    result.params = impl[0]
-#    result.pragma = impl[1]
+#[
+    Internal procedure used by the `as` macro as well as the `resolveHook` macro to transform
+    closure in the style of:
+
+    Type as (
+        block:
+            ....
+    )
+]#
+proc doAs(procImpl: NimNode, body: NimNode): NimNode =
+    # TODO: validate node types and raise exceptions
+    result = newProc(body = body[0][1])
+
+    result.pragma = procImpl[1]
+    result.params = talkTree(
+        procImpl[0],
+        proc(node: NimNode, ctx: NimNode): NimNode =
+            result = copyNimNode(node)
+
+            if (node.kind == nnkSym):
+                result = newIdentNode(node.strVal)
+    )
+
+macro `as`*(procDef: typedesc[proc], body: untyped): proc =
+    result = doAs(
+        procDef.getTypeImpl[^1].getTypeImpl,
+        body
+    )
 
 #[
     Constructor
 ]#
 
-proc init*(this: auto) =
+proc init*[T](this: T): void =
     discard
 
 macro init*[T](self: typedesc[T], args: varargs[untyped]): T =
     if args.len > 0:
-        result = quote do:
-            block:
-                var this = system.new(`self`)
-                this.init(`args`)
-                this
+        result =
+            quote do:
+                block:
+                    var this = system.new(`self`)
+                    this.init(`args`)
+                    this
     else:
-        result = quote do:
-            block:
-                var this = system.new(`self`)
-                this.init()
-                this
+        result =
+            quote do:
+                block:
+                    var this = system.new(`self`)
+                    this.init()
+                    this
 
 ##
 ##    Class definitions
@@ -164,17 +197,6 @@ template static*() {. pragma .}
 template mutator*() {. pragma .}
 template abstract*() {. pragma .}
 
-#[
-    Recurisvely walk an entire NimNode's treee structure and recreate it.  The resulting TreeCall
-    can either copy the node (with modificaitons) or create a totally new one in its place.  It
-    can use the context (ctx) to look to the parent node and its siblings as well.
-]#
-proc talkTree(node: NimNode, call: TreeCall, ctx: NimNode = nil): NimNode {. compileTime .} =
-    result = call(node, ctx)
-
-    if result.len == 0 and result.kind == node.kind:
-        for i, child in node:
-            result.add(talkTree(child, call, node))
 
 #[
     Transforms all proc, method, template, converters, and iterators with requisite OOP programming
@@ -365,31 +387,69 @@ macro begin*(scope: typedesc, body: untyped) =
     )
 
 ##
-##    Class definitions
+## Shape resolution
 ##
+
+macro resolveHook*(procDef: typedesc[proc], shape: typedesc, self: typedesc, body: untyped): proc =
+    var
+        selfImpl = self.getTypeImpl[^1]
+        shapeImpl = shape.getTypeImpl[^1]
+
+    result = doAs(
+        procDef.getTypeImpl[^1].getTypeImpl,
+        body
+    )
+
+    if shapeImpl.kind == nnkBracketExpr:
+        shapeImpl = shapeImpl[1]
+
+    if selfImpl.kind == nnkBracketExpr:
+        selfImpl = shapeImpl[1]
+
+    result = talkTree(
+        result,
+        proc(node: NimNode, ctx: NimNode): NimNode =
+            result = copyNimNode(node)
+
+            if node.kind == nnkIdent:
+                case node.strVal:
+                    of "self":
+                        result = newIdentNode(selfImpl.strVal)
+                    of "shape":
+                        result = newIdentNode(shapeImpl.strVal)
+    )
 
 #[
     The resolve macro is responsible for finalizing the facet object and adding it to the
     global configuration.  This includes setting up call properties based on hooks as well
     as any transformation of OOP keywords.
 ]#
-macro resolve(facet: untyped): untyped =
+macro resolveShape*(shape: typedesc, self: typedesc, facet: untyped): untyped =
     result = newStmtList()
-
-    let
-        target = facet[0].strVal
-        currentPlan = facetPlans[high facetPlans]
-        facetObjectName = newIdentNode("facet" & $currentPlan.index)
 
     var
         callNode: NimNode
+        selfImpl = self.getTypeImpl[^1]
+        shapeImpl = shape.getTypeImpl[^1]
+
+    if selfImpl.kind == nnkBracketExpr:
+        selfImpl = selfImpl[1]
+
+    if shapeImpl.kind == nnkBracketExpr:
+        shapeImpl = shapeImpl[1]
+
+    let
+        current = facetPlans[high facetPlans]
+        facetSelf = newIdentNode(selfImpl.strVal)
+        facetShape = newIdentNode(shapeImpl.strVal)
+        facetObjectName = newIdentNode("facet" & $current.index)
 
     #
     # Cleanup:
     # - Check if current facet has a call and remove corresponding node from property and store
     #
 
-    for i, node in facetNodes[currentPlan.index]:
+    for i, node in facetNodes[current.index]:
         if node.kind == nnkExprColonExpr and node[0].strVal == "call":
             callNode = node[1]
             facet.del(i)
@@ -409,7 +469,7 @@ macro resolve(facet: untyped): untyped =
             the type of facet and transform the current Delegate().  This effectively allows
             facets to be added to facets to change their behavior.
         ]#
-        if currentPlan.class != facetPlan.scope:
+        if current.class != facetPlan.scope:
             continue
 
         #[
@@ -420,17 +480,28 @@ macro resolve(facet: untyped): untyped =
                 if node.kind == nnkExprColonExpr and node[0].strVal == "call":
                     callNode = node[1]
 
-                    facetNodes[currentPlan.index].insert(1, newColonExpr(
+                    facetNodes[current.index].insert(1, newColonExpr(
                         newIdentNode("call"),
                         copyNimTree(callNode)
                     ))
 
     # Add the call node back for non-Hook classes
 
-    if callNode != nil and currentPlan.class != Hook:
+    if callNode != nil and current.class != Hook:
+        var
+            facetCode: NimNode
         let
             thisReference = newIdentNode("this")
-            facetCallName = newIdentNode("facet" & $currentPlan.index & "call")
+            facetCallName = newIdentNode("facet" & $current.index & "call")
+
+        if callNode.kind == nnkInfix and callNode[0].strVal == "as":
+            let
+                callType = callNode[1]
+                callNode = callNode[2]
+
+            facetCode = quote do:
+                mininim.resolveHook(`callType`, `facetShape`, `facetSelf`, `callNode`)
+        else:
             facetCode = talkTree(
                 callNode,
                 proc(node: NimNode, ctx: NimNode): NimNode =
@@ -439,9 +510,9 @@ macro resolve(facet: untyped): untyped =
                     if node.kind == nnkIdent:
                         case node.strVal:
                             of "self":
-                                result = newIdentNode(target)
+                                result = facetSelf
                             of "shape":
-                                result = newIdentNode(currentPlan.realm)
+                                result = facetShape
             )
 
         result.add(
@@ -507,13 +578,12 @@ macro shape*(scope: typedesc, body: untyped): untyped =
                 quote do:
                     static:
                         facetPlans.add((
-                            realm: $`scope`,            # The class name for which the facet was added
                             scope: `scope`.TypeID,      # The class id for which the facet was added
                             class: `class`.TypeID,      # The class of the facet itself (e.g. Middleware)
                             index: `facetNodeIndex`     # The location of the facet's NimNode in facetNodes
                         ))
 
-                    mininim.resolve(`facet`)
+                    mininim.resolveShape(`scope`, `class`, `facet`)
             )
 
     when defined(debug):
@@ -571,8 +641,10 @@ begin Shared:
 shape Shared: @[
     Hook(
         init: true,
-        call: proc(): void {. closure .} =
-            discard this.app.get(shape)
+        call: DelegateHook as (
+            block:
+                discard this.app.get(shape)
+        )
     )
 ]
 
