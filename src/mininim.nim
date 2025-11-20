@@ -13,6 +13,7 @@ import
     std/strtabs,
     std/options,
     std/locks,
+    std/sugar,
     std/os
 
 export
@@ -30,6 +31,7 @@ export
     strtabs,
     options,
     locks,
+    sugar,
     os
 
 type
@@ -43,7 +45,7 @@ type
         instances*: Table[TypeId, ref RootObj]
         lock*: Lock
 
-    InitHook = proc(): void {. closure, gcsafe .}
+    InitHook = proc(): void
 
     App* = ref object of Class
         config*: Config
@@ -501,6 +503,7 @@ macro resolveShape*(shape: typedesc, self: typedesc, facet: untyped): untyped =
 
             facetCode = quote do:
                 mininim.resolveHook(`callType`, `facetShape`, `facetSelf`, `callNode`)
+
         else:
             facetCode = talkTree(
                 callNode,
@@ -518,9 +521,11 @@ macro resolveShape*(shape: typedesc, self: typedesc, facet: untyped): untyped =
         result.add(
             quote do:
                 let `facetCallName` = block:
-                    let `thisReference` {. used .} = `facetObjectName`; `facetCode`
+                    let `thisReference` = `facetObjectName`
+                    `facetCode`
 
                 `facetObjectName`.call = addr `facetCallName`
+
         )
 
     result.add(
@@ -594,7 +599,7 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 ]#
 
 begin Facet:
-    template `[]`*(self: typedesc): untyped =
+    template `[]`*(self: typedesc[proc]): untyped =
         cast[self](cast[ptr self](this.call)[])
 
     proc matches*(class: typedesc, query: tuple = ()): bool =

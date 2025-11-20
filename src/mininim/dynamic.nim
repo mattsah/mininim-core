@@ -24,7 +24,7 @@ type
         boolVal: bool
 
     FunctionRegistry* = Table[string, Function]
-    FunctionWrapper* = proc(this: dyn, args: seq[dyn]): dyn {. closure .}
+    FunctionWrapper* = proc(this: dyn, args: seq[dyn]): dyn
     Function* = ref object of Class
         minArgc*: int
         maxArgc*: int
