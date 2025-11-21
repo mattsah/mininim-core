@@ -46,6 +46,9 @@ begin App:
                 else:
                     result = T.init()
 
+                if result is Class:
+                    result.app = this
+
                 if shared != nil:
                     this.storage.instances[target.TypeID] = cast[RootRef](result)
 

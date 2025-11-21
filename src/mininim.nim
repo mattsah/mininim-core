@@ -38,11 +38,12 @@ type
     TypeID* = uint16
 
     Class* {. inheritable .} = ref object
+        app*: App
 
     TreeCall = proc(node: NimNode, ctx: NimNode): NimNode
 
     Storage* = object
-        instances*: Table[TypeId, ref RootObj]
+        instances*: Table[TypeId, RootRef]
         lock*: Lock
 
     InitHook = proc(): void
@@ -55,7 +56,6 @@ type
         data: seq[Facet]
 
     Facet* = ref object of Class
-        app*: App
         call*: pointer
         class*: TypeID
         scope*: TypeID

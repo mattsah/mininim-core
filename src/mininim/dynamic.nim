@@ -483,6 +483,8 @@ begin dyn:
 
         if this of nil:
             result = that.kind == dynNull
+        elif that of nil:
+            result = this.kind == dynNull
         else:
             case this.kind:
                 of dynInt:
@@ -511,6 +513,8 @@ begin dyn:
 
         if this of nil:
             result = that.kind != dynNull
+        elif that of nil:
+            result = this.kind != dynNull
         else:
             case this.kind:
                 of dynInt:
