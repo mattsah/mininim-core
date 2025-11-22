@@ -102,7 +102,10 @@ begin msNode:
             of msNString:
                 result = this.strVal
             of msNIdent:
-                result = scope[this.identName]
+                if scope.has(this.identName):
+                    result = scope[this.identName]
+                else:
+                    result = null
             of msNBinaryOp:
                 case this.binaryOp:
                     of "+":
@@ -113,6 +116,11 @@ begin msNode:
                         result = this.left.value(scope) * this.right.value(scope)
                     of "/":
                         result = this.left.value(scope) / this.right.value(scope)
+                    of "?":
+                        if this.left.value(scope) == null:
+                            result = this.right.value(scope)
+                        else:
+                            result = this.left.value(scope)
                     of "==":
                         result = this.left.value(scope) == this.right.value(scope)
                     of "!=":
@@ -136,7 +144,10 @@ begin msNode:
                 for pair in this.pairs:
                     result[pair.keyName.identName] = pair.pairVal.value(scope)
             of msNField:
-                result = this.fieldObj.value(scope)[this.fieldName]
+                if this.fieldObj.value(scope).has(this.fieldName):
+                    result = this.fieldObj.value(scope)[this.fieldName]
+                else:
+                    result = null
             of msNKey:
                 result = this.keyObj.value(scope)[this.keyExpr.value(scope)]
             else:
@@ -160,7 +171,7 @@ begin Script:
                 #[
                     Symbolic Operators
                 ]#
-                of '+', '-', '*', '/':
+                of '+', '-', '*', '/', '?':
                     result.add(msToken(kind: msOp, opVal: $code[i]))
 
                 of '=', '!':
@@ -505,7 +516,7 @@ begin Script:
     method parseExpr(): msNode {. base .}=
         result = this.parseTerm()
 
-        while this.current.kind == msOp and this.current.value in ["+", "-", "&", "|", "==", "!="]:
+        while this.current.kind == msOp and this.current.value in ["+", "-", "&", "|", "?", "==", "!="]:
             let
                 operator = this.current.value
 
@@ -517,5 +528,3 @@ begin Script:
                 right: this.parseTerm(),
                 binaryOp: operator
             )
-
-
