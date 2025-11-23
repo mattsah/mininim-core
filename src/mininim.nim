@@ -597,7 +597,13 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 #[
 
 ]#
+begin Class:
+    method useCache*(): bool =
+        result = os.getEnv("CACHING") == 1
 
+#[
+
+]#
 begin Facet:
     template `[]`*(self: typedesc[proc]): untyped =
         cast[self](cast[ptr self](this.call)[])
