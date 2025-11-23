@@ -116,15 +116,24 @@ begin msNode:
                         result = this.left.value(scope) * this.right.value(scope)
                     of "/":
                         result = this.left.value(scope) / this.right.value(scope)
+                    of "==":
+                        result = this.left.value(scope) == this.right.value(scope)
+                    of "!=":
+                        result = this.left.value(scope) != this.right.value(scope)
+                    of ">=":
+                        result = this.left.value(scope) >= this.right.value(scope)
+                    of "<=":
+                        result = this.left.value(scope) <= this.right.value(scope)
+                    of ">":
+                        result = this.left.value(scope) > this.right.value(scope)
+                    of "<":
+                        result = this.left.value(scope) < this.right.value(scope)
                     of "?":
                         if this.left.value(scope) == null:
                             result = this.right.value(scope)
                         else:
                             result = this.left.value(scope)
-                    of "==":
-                        result = this.left.value(scope) == this.right.value(scope)
-                    of "!=":
-                        result = this.left.value(scope) != this.right.value(scope)
+
             of msNCall:
                 if dyn.hasFunction(this.methodName):
                     result = dyn.callFunction(
@@ -174,10 +183,12 @@ begin Script:
                 of '+', '-', '*', '/', '?':
                     result.add(msToken(kind: msOp, opVal: $code[i]))
 
-                of '=', '!':
+                of '=', '!', '>', '<':
                     if i+1 < code.len and code[i+1] in {'='}:
                         result.add(msToken(kind: msOp, opVal: $code[i..i+1]))
                         inc i
+                    elif code[i] in {'>', '<'}:
+                        result.add(msToken(kind: msOp, opVal: $code[i]))
 
                 #[
                     Numbers

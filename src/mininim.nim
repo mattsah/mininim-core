@@ -598,7 +598,7 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 
 ]#
 begin Class:
-    method useCache*(): bool =
+    method useCache*(): bool {. base .} =
         result = os.getEnv("CACHING") == 1
 
 #[

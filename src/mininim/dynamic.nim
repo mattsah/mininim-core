@@ -478,6 +478,10 @@ begin dyn:
     # Equality and boolean operations
     #
 
+    #[
+        Equal
+    ]#
+
     proc `==`*(that: self): bool =
         result = false
 
@@ -488,17 +492,13 @@ begin dyn:
         else:
             case this.kind:
                 of dynInt:
-                    case that.kind:
-                        of dynInt:
-                            result = this.intVal == that.intVal
-                        else:
-                            discard
+                    result = this.intVal == toInt(that)
+                of dynFloat:
+                    result = this.floatVal == toFloat(that)
                 of dynString:
-                    case that.kind:
-                        of dynString:
-                            result = this.stringVal == that.stringVal
-                        else:
-                            discard
+                    result = this.stringVal == toString(that)
+                of dynBool:
+                    result = this.boolVal == toBool(that)
                 else:
                     discard
 
@@ -508,6 +508,9 @@ begin dyn:
     proc `==`*(that: auto): bool {. infix .}=
         result = this == toDyn(that)
 
+    #[
+        Not Equal
+    ]#
     proc `!=`*(that: self): bool =
         result = false
 
@@ -518,19 +521,16 @@ begin dyn:
         else:
             case this.kind:
                 of dynInt:
-                    case that.kind:
-                        of dynInt:
-                            result = this.intVal != that.intVal
-                        else:
-                            discard
+                    result = this.intVal != toInt(that)
+                of dynFloat:
+                    result = this.floatVal != toFloat(that)
                 of dynString:
-                    case that.kind:
-                        of dynString:
-                            result = this.stringVal != that.stringVal
-                        else:
-                            discard
+                    result = this.stringVal != toString(that)
+                of dynBool:
+                    result = this.boolVal != toBool(that)
                 else:
                     discard
+
 
     proc `!=`*(that: auto): bool =
         result = this != toDyn(that)
@@ -538,6 +538,68 @@ begin dyn:
     proc `!=`*(that: auto): bool {. infix .}=
         result = this != toDyn(that)
 
+    #[
+        Greater Than or Equal
+    ]#
+    proc `>=`*(that: self): bool =
+        result = false
+
+        if this of nil:
+            result = that.kind == dynNull or false
+        elif that of nil:
+            result = this.kind == dynNull or true
+        else:
+            case this.kind:
+                of dynInt:
+                    result = this.intVal >= toInt(that)
+                of dynFloat:
+                    result = this.floatVal >= toFloat(that)
+                of dynString:
+                    result = this.stringVal >= toString(that)
+                of dynBool:
+                    result = this.boolVal >= toBool(that)
+                else:
+                    discard
+
+    proc `>=`*(that: auto): bool =
+        result = this >= toDyn(that)
+
+    proc `>=`*(that: auto): bool {. infix .}=
+        result = this >= toDyn(that)
+
+
+    #[
+        Less Than or Equal
+    ]#
+    proc `<=`*(that: self): bool =
+        result = false
+
+        if this of nil:
+            result = that.kind == dynNull or true
+        elif that of nil:
+            result = this.kind == dynNull or false
+        else:
+            case this.kind:
+                of dynInt:
+                    result = this.intVal >= toInt(that)
+                of dynFloat:
+                    result = this.floatVal >= toFloat(that)
+                of dynString:
+                    result = this.stringVal >= toString(that)
+                of dynBool:
+                    result = this.boolVal >= toBool(that)
+                else:
+                    discard
+
+    proc `<=`*(that: auto): bool =
+        result = this <= toDyn(that)
+
+    proc `<=`*(that: auto): bool {. infix .}=
+        result = this <= toDyn(that)
+
+    #[
+
+    ]#
     proc `and`*(that: auto): bool =
         if this of nil:
             result = toBool(null) and that
