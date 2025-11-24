@@ -365,11 +365,15 @@ begin dyn:
     #
 
     #[
-        Shorthand for string conversion
+        Shorthand for string conversion, but explicitly for printing
     ]#
     proc `$`*(): string =
         if this == nil: # Handled explicitly as you can't pass along null ref
             result = "null"
+        elif this.kind == dynArray:
+            result = "[" & this.arrayVal.join(",") & "]"
+        elif this.kind == dynObject:
+            result = $this.objectVal
         else:
             result = toString(this)
 
@@ -519,8 +523,9 @@ begin dyn:
         Equal
     ]#
 
-    proc `==`*(that: self): bool =
-        result = false
+    proc `==`*(that: self): bool {. noSideEffect .} =
+        var
+            error = false
 
         if this of nil:
             result = that.kind == dynNull
@@ -537,29 +542,25 @@ begin dyn:
                         of dynString:
                             result = this.stringVal == toString(that)
                         else:
-                            discard
+                            error = true
                 of dynArray:
                     case that.kind:
                         of dynArray:
-                            if this.arrayVal.len != that.arrayVal.len:
-                                result = false;
-                            else:
-                                discard
-                                # more expenstve operation
+                            if this.arrayVal.len == that.arrayVal.len:
+                                result = this.arrayVal == that.arrayVal
                         else:
-                            discard
+                            error = true
                 of dynObject:
                     case that.kind:
                         of dynObject:
-                            if this.objectVal.len != that.objectVal.len:
-                                result = false;
-                            else:
-                                discard
-                                # more expenstve operation
+                            if this.objectVal.len == that.objectVal.len:
+                                result = this.objectVal == that.objectVal
                         else:
-                            discard
+                            error = true
                 else:
-                    discard
+                    error = true
+        if error:
+            raise newException(ValueError, "Cannot compare (==) [{this.kind}] to [{that.kind}]")
 
     proc `==`*(that: auto): bool =
         result = this == toDyn(that)
@@ -588,6 +589,9 @@ begin dyn:
         Greater Than
     ]#
     proc `>`*(that: self): bool =
+        var
+            error = false
+
         if this of nil:
             result = false
         elif that of nil:
@@ -603,29 +607,29 @@ begin dyn:
                         of dynString:
                             result = this.stringVal > toString(that)
                         else:
-                            discard
+                            error = true
                 of dynArray:
                     case that.kind:
                         of dynArray:
                             if this.arrayVal.len > that.arrayVal.len:
                                 result = true;
                             else:
-                                discard
-                                # more expenstve operation
+                                error = true
                         else:
                             discard
                 of dynObject:
                     case that.kind:
                         of dynObject:
                             if this.objectVal.len > that.objectVal.len:
-                                result = false;
+                                result = true;
                             else:
-                                discard
-                                # more expenstve operation
+                                error = true
                         else:
-                            discard
+                            error = true
                 else:
-                    discard
+                    error = true
+        if error:
+            raise newException(ValueError, "Cannot compare (>) [{this.kind}] to [{that.kind}]")
 
     proc `>`*(that: auto): bool =
         result = this > toDyn(that)
@@ -649,6 +653,9 @@ begin dyn:
         Less Than
     ]#
     proc `<`*(that: self): bool =
+        var
+            error = false
+
         if this of nil:
             result = that.kind != dynNull
         elif that of nil:
@@ -664,29 +671,29 @@ begin dyn:
                         of dynString:
                             result = this.stringVal < toString(that)
                         else:
-                            discard
+                            error = true
                 of dynArray:
                     case that.kind:
                         of dynArray:
                             if this.arrayVal.len < that.arrayVal.len:
                                 result = true;
                             else:
-                                discard
-                                # more expenstve operation
+                                error = true
                         else:
-                            discard
+                            error = true
                 of dynObject:
                     case that.kind:
                         of dynObject:
                             if this.objectVal.len > that.objectVal.len:
-                                result = false;
+                                result = true;
                             else:
-                                discard
-                                # more expenstve operation
+                                error = true
                         else:
-                            discard
+                            error = true
                 else:
-                    discard
+                    error = true
+        if error:
+            raise newException(ValueError, "Cannot compare (<) [{this.kind}] to [{that.kind}]")
 
     #[
         Less Than or Equal
@@ -1083,16 +1090,15 @@ begin dyn:
         "has",
         proc(this: self, query: self): self =
             result = false
-
-            if this of string:
-                result = toString(this).find(query) >= 0
+            if this of null:
+                result = false
             elif this of array:
                 result = toArray(this).contains(query)
             elif this of object:
                 let
                     concern = toObject(this)
                 if concern.hasKey(query):
-                    result = concern[query] as bool
+                    result = concern[query] != null
             else:
-                result = this == query
+                result = toString(this).find(query) >= 0
     )
