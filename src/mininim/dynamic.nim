@@ -126,30 +126,50 @@ converter toDyn*[K: auto, T: auto](this: Table[K, T]): dyn =
 macro `~`*(value: untyped): dyn =
     var
         arrayVal: NimNode
+        realVal: NimNode
 
-    if value.kind == nnkBracket:
-        arrayVal = value
-    elif value.kind == nnkPrefix and value[0].strVal == "@" and value[1].kind == nnkBracket:
-        arrayVal = value[1]
+    if value.kind == nnkPar:
+        realVal = value[0]
+    else:
+        realVal = value
 
-    if arrayVal != nil and arrayVal.len == 0:
-        result = quote do:
-            dyn(kind: dynArray, arrayVal: newSeq[dyn]())
-    elif value.kind == nnkBracketExpr:
+    if realVal.kind == nnkBracket:
+        arrayVal = realVal
+    elif realVal.kind == nnkPrefix and realVal[0].strVal == "@" and realVal[1].kind == nnkBracket:
+        arrayVal = realVal[1]
+
+    if arrayVal != nil:
+        if arrayVal.len == 0:
+            result = quote do:
+                dyn(kind: dynArray, arrayVal: newSeq[dyn]())
+        else:
+            let
+                args = newNimNode(nnkArgList)
+            for child in arrayVal:
+                args.add(
+                    quote do:
+                        ~`child`
+                )
+
+            result = quote do:
+                dyn(kind: dynArray, arrayVal: @[`args`])
+
+    elif realVal.kind == nnkBracketExpr:
         let
-            dyn = value[0]
-            key = value[1]
+            dyn = realVal[0]
+            key = realVal[1]
         result = quote do:
             toDyn(`dyn`)[`key`]
     else:
         result = quote do:
-            toDyn(`value`)
-
-template `:=`*(this: untyped, value: untyped): untyped =
-    var this = ~value
+            toDyn(`realVal`)
 
 template `~@`*(value: untyped): untyped =
     ~ value
+
+template `:=`*(this: untyped, value: untyped): untyped =
+    var this: dyn = ~(value)
+
 
 #[
     Primary dyn implementation
@@ -917,7 +937,7 @@ begin dyn:
                         discard
             else:
                 discard
-        if value.kind != dynNull:
+        if value.kind == dynNull:
             raise newException(
                 ValueError,
                 fmt "Unsupported operator for dynamic values: {$this.kind} * {$that.kind}"
@@ -950,7 +970,7 @@ begin dyn:
                         discard
             else:
                 discard
-        if value.kind != dynNull:
+        if value.kind == dynNull:
             raise newException(
                 ValueError,
                 fmt "Unsupported operator for dynamic values: {$this.kind} / {$that.kind}"
@@ -1076,12 +1096,30 @@ begin dyn:
                 result = toObject(this).len
             elif this of bool:
                 result = if this: 1 else: 0
-            elif this of float:
-                let
+            elif this of int:
+                var
+                    value: string
+                    sign: int = 1
+                if this < 0:
+                    value = toString(this)[1..^1]
+                    sign = -1
+                else:
                     value = toString(this)
-                    start = value.find('.')
 
-                result = toFloat($start & "." & $(value.len - (start + 1)))
+                result = sign * toInt(value.len)
+            elif this of float:
+                var
+                    value: string
+                    sign: int = 1
+                if this < 0:
+                    value = toString(this)[1..^1]
+                    sign = -1
+                else:
+                    value = toString(this)
+                let
+                    split = value.find('.')
+
+                result = sign * toFloat($split & "." & $(value.len - (split + 1)))
             else:
                 result = toString(this).len
     )
