@@ -259,8 +259,8 @@ begin dyn:
         elif this.kind == dynBool:
             return this.boolVal
         else:
-            when defined debug:
-                echo fmt "Converting dynamic value [{this.kind}] to bool"
+#            when defined debug:
+#                echo fmt "Converting dynamic value [{this.kind}] to bool"
             case this.kind:
                 of dynInt:
                     result = this.intVal > 0
@@ -286,8 +286,8 @@ begin dyn:
         elif this.kind == dynInt:
             result = this.intVal
         else:
-            when defined debug:
-                echo fmt "Converting dynamic value [{this.kind}] to int"
+#            when defined debug:
+#                echo fmt "Converting dynamic value [{this.kind}] to int"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: 1 else: 0
@@ -314,8 +314,8 @@ begin dyn:
         elif this.kind == dynFloat:
             result = this.floatVal
         else:
-            when defined debug:
-                echo fmt "Converting dynamic value [{this.kind}] to float"
+#            when defined debug:
+#                echo fmt "Converting dynamic value [{this.kind}] to float"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: 1.0 else: 0.0
@@ -342,8 +342,8 @@ begin dyn:
         elif this.kind == dynString:
             result = this.stringVal
         else:
-            when defined debug:
-                echo fmt "Converting dynamic value [{this.kind}] to string"
+#            when defined debug:
+#                echo fmt "Converting dynamic value [{this.kind}] to string"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: "true" else: "false"
@@ -360,8 +360,8 @@ begin dyn:
         if this.kind == dynArray:
             result = this.arrayVal
         else:
-            when defined debug:
-                echo fmt "Converting dynamic value [{this.kind}] to array (sequence)"
+#            when defined debug:
+#                echo fmt "Converting dynamic value [{this.kind}] to array (sequence)"
             case this.kind:
                 of dynObject:
                     result = toSeq(this.objectVal.values)
