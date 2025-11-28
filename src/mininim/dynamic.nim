@@ -351,6 +351,8 @@ begin dyn:
                     result = $this.intVal
                 of dynFloat:
                     result = $this.floatVal
+                of dynArray:
+                    result = this.arrayVal.mapIt(toString(it)).join()
                 else:
                     raise newException(ValueError, fmt "Cannot convert [{this.kind}] to string")
 
