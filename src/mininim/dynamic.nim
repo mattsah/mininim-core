@@ -448,7 +448,7 @@ begin dyn:
                 var
                     key = toInt(key)
                 if key < 0:
-                    key = this.arrayVal.len - key
+                    key = this.arrayVal.len + key
                 if key <= this.arrayVal.high and key >= this.arrayVal.low:
                     result = this.arrayVal[key]
                 else:
@@ -460,7 +460,7 @@ begin dyn:
                 var
                     key = toInt(key)
                 if key < 0:
-                    key = this.stringVal.len - key
+                    key = this.stringVal.len + key
                 if key <= this.stringVal.high and key >= this.stringVal.low:
                     result = $this.stringVal[key]
                 else:
