@@ -537,7 +537,7 @@ begin dyn:
         else:
             case this.kind:
                 of dynBool: # optimize for bools directly
-                    result = this.boolVal
+                    result = not this.boolVal
                 else: # retain toBool centralized logic for all others
                     result = not toBool(this)
 
@@ -932,7 +932,7 @@ begin dyn:
             of dynFloat:
                 case that.kind:
                     of dynInt:
-                        value = ~(this.floatVal * float(this.intVal)) # causes recursion if different
+                        value = ~(this.floatVal * float(that.intVal)) # causes recursion if different
                     of dynFloat:
                         value = ~(this.floatVal * that.floatVal)
                     else:

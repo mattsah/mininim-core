@@ -30,7 +30,7 @@ type
                 opVal: string
 
     msNK = enum
-        msNInt, msNFloat, msNString, msNIdent, msNField, msNCall,
+        msNInt, msNFloat, msNString, msNBool, msNIdent, msNField, msNCall,
         msNBinaryOp, msNUnaryOp, msNArray, msNKey, msNObject, msNPair
 
     msNode = ref object
@@ -41,6 +41,8 @@ type
                 floatVal: float
             of msNString:
                 strVal: string
+            of msNBool:
+                boolVal: bool
             of msNIdent:
                 identName: string
             of msNField:
@@ -101,6 +103,8 @@ begin msNode:
                 result = this.floatVal
             of msNString:
                 result = this.strVal
+            of msNBool:
+                result = this.boolVal
             of msNIdent:
                 if scope.has(this.identName):
                     result = scope[this.identName]
@@ -133,7 +137,14 @@ begin msNode:
                             result = this.right.value(scope)
                         else:
                             result = this.left.value(scope)
-
+            of msNUnaryOp:
+                case this.unaryOp:
+                    of "-":
+                        result = this.operand.value(scope) * -1
+                    of "!":
+                        result = not this.operand.value(scope)
+                    else:
+                         raise newException(ValueError, "Unsupported unary operator: " & this.unaryOp)
             of msNCall:
                 if dyn.hasFunction(this.methodName):
                     result = dyn.callFunction(
@@ -164,6 +175,7 @@ begin msNode:
 
 begin Script:
     method parseExpr(): msNode {. base .}
+    method parseAccess(): msNode {. base .}
 
     proc lex*(code: string): seq[msToken] {. static .} =
         var
@@ -187,7 +199,7 @@ begin Script:
                     if i+1 < code.len and code[i+1] in {'='}:
                         result.add(msToken(kind: msOp, opVal: $code[i..i+1]))
                         inc i
-                    elif code[i] in {'>', '<'}:
+                    else:
                         result.add(msToken(kind: msOp, opVal: $code[i]))
 
                 #[
@@ -348,6 +360,13 @@ begin Script:
                 )
                 this.consume(msString)
 
+            of msBool:
+                result = msNode(
+                    kind: msNBool,
+                    boolVal: this.current.boolVal
+                )
+                this.consume(msBool)
+
             of msWord:
                 let
                     name = this.current.wordVal
@@ -436,7 +455,14 @@ begin Script:
                     result = msNode(
                         kind: msNUnaryOp,
                         unaryOp: "-",
-                        operand: this.parsePrimary()
+                        operand: this.parseAccess()
+                    )
+                elif this.current.value == "!":
+                    this.consume(msOp, "!")
+                    result = msNode(
+                        kind: msNUnaryOp,
+                        unaryOp: "!",
+                        operand: this.parseAccess()
                     )
             else:
                 raise newException(
@@ -527,7 +553,7 @@ begin Script:
     method parseExpr(): msNode {. base .}=
         result = this.parseTerm()
 
-        while this.current.kind == msOp and this.current.value in ["+", "-", "&", "|", "?", "==", "!="]:
+        while this.current.kind == msOp and this.current.value in ["+", "-", "&", "|", "?", "==", "!=", ">", "<", ">=", "<="]:
             let
                 operator = this.current.value
 
