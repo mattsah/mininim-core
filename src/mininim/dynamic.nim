@@ -14,6 +14,8 @@ type
         dynBool,
         dynNull
 
+    dynToString* = proc(this: dyn): string
+
     dyn* = ref object of Class
         kind: dynType
         intVal: int
@@ -22,6 +24,7 @@ type
         objectVal: Table[string, dyn]
         arrayVal: seq[dyn]
         boolVal: bool
+        toString*: dynToString
 
     FunctionRegistry* = Table[string, Function]
     FunctionWrapper* = proc(this: dyn, args: seq[dyn]): dyn
@@ -38,22 +41,22 @@ template null*(): dyn =
 #[
     Converters to dyn type
 ]#
-converter toDyn*(this: typeof(nil)): dyn =
+converter asDyn*(this: typeof(nil)): dyn =
     when defined debug:
         echo fmt "Converting [nil] to dynamic value"
     result = dyn(kind: dynNull)
 
-converter toDyn*(this: int): dyn =
+converter asDyn*(this: int): dyn =
     when defined debug:
         echo fmt "Converting [int] to dynamic value"
     result = dyn(kind: dynInt, intVal: this)
 
-converter toDyn*(this: float): dyn =
+converter asDyn*(this: float): dyn =
     when defined debug:
         echo fmt "Converting [float] to dynamic value"
     result = dyn(kind: dynFloat, floatVal: this)
 
-converter toDyn*(this: bool): dyn =
+converter asDyn*(this: bool): dyn =
     when defined debug:
         echo fmt "Converting [bool] to dynamic value"
     result = dyn(
@@ -61,20 +64,20 @@ converter toDyn*(this: bool): dyn =
         boolVal: this
     )
 
-converter toDyn*(this: string): dyn =
+converter asDyn*(this: string): dyn =
     when defined debug:
         echo fmt "Converting [string] to dynamic value"
     result = dyn(kind: dynString, stringVal: this)
 
-converter toDyn*[T: auto](this: openArray[T]): dyn =
+converter asDyn*[T: auto](this: openArray[T]): dyn =
     when defined debug:
         echo fmt "Converting [openArray[{$T}]] to dynamic value"
     result = dyn(
         kind: dynArray,
-        arrayVal: this.mapIt(toDyn(it))
+        arrayVal: this.mapIt(asDyn(it))
     )
 
-converter toDyn*[T: openArray](this: T): dyn =
+converter asDyn*[T: openArray](this: T): dyn =
     when defined debug:
         echo fmt "Converting [string] to dynamic value"
     result = dyn(
@@ -82,7 +85,7 @@ converter toDyn*[T: openArray](this: T): dyn =
         arrayVal: newSeq[dyn]()
     )
 
-converter toDyn*(this: tuple): dyn =
+converter asDyn*(this: tuple): dyn =
     when defined debug:
         echo fmt "Converting [tuple] to dynamic value"
     var
@@ -95,7 +98,7 @@ converter toDyn*(this: tuple): dyn =
         for key, item in this.fieldPairs:
             if key != "Field" & $cur:
                 table = true
-            value.add((key, toDyn(item)))
+            value.add((key, asDyn(item)))
             inc cur
     if table:
         result = dyn(
@@ -108,13 +111,13 @@ converter toDyn*(this: tuple): dyn =
             arrayVal: value.mapIt(it[1])
         )
 
-converter toDyn*[K: auto, T: auto](this: Table[K, T]): dyn =
+converter asDyn*[K: auto, T: auto](this: Table[K, T]): dyn =
     when defined debug:
         echo fmt "Converting [Table[{$K}, {$T}]] to dynamic value"
     var
         value = initTable[string, dyn]()
     for key, item in this.pairs:
-        value[$key] = toDyn(item)
+        value[$key] = asDyn(item)
     result = dyn(
         kind: dynObject,
         objectVal: value
@@ -159,10 +162,10 @@ macro `~`*(value: untyped): dyn =
             dyn = realVal[0]
             key = realVal[1]
         result = quote do:
-            toDyn(`dyn`)[`key`]
+            asDyn(`dyn`)[`key`]
     else:
         result = quote do:
-            toDyn(`realVal`)
+            asDyn(`realVal`)
 
 template `~@`*(value: untyped): untyped =
     ~ value
@@ -193,17 +196,17 @@ begin dyn:
         result = null
 
         when T == int:
-            result = ~toInt(this)
+            result = ~asInt(this)
         when T == float:
-            result = ~toFloat(this)
+            result = ~asFloat(this)
         when T == string:
-            result = ~toString(this)
+            result = ~asString(this)
         when T == array:
-            result = ~toArray(this)
+            result = ~asArray(this)
         when T == object:
-            result = ~toObject(this)
+            result = ~asObject(this)
         when T == bool:
-            result = ~toBool(this)
+            result = ~asBool(this)
 
     proc `of`*(that: typeof(nil)): bool =
         if this == nil:
@@ -247,20 +250,20 @@ begin dyn:
     # Converters to other types
     #
 
-    converter toDyn*(): dyn =
+    converter asDyn*(): dyn =
         if this == nil:
-            result = toDyn(nil)
+            result = asDyn(nil)
         else:
             result = this
 
-    converter toBool*(): bool =
+    converter asBool*(): bool =
         if this of nil:
             return false
         elif this.kind == dynBool:
             return this.boolVal
         else:
-#            when defined debug:
-#                echo fmt "Converting dynamic value [{this.kind}] to bool"
+            when defined debug:
+                echo fmt "Converting dynamic value [{this.kind}] to bool"
             case this.kind:
                 of dynInt:
                     result = this.intVal > 0
@@ -280,14 +283,14 @@ begin dyn:
                 else:
                     raise newException(ValueError, fmt "Cannot convert [{this.kind}] to bool")
 
-    converter toInt*(): int =
+    converter asInt*(): int =
         if this of nil:
             result = 0
         elif this.kind == dynInt:
             result = this.intVal
         else:
-#            when defined debug:
-#                echo fmt "Converting dynamic value [{this.kind}] to int"
+            when defined debug:
+                echo fmt "Converting dynamic value [{this.kind}] to int"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: 1 else: 0
@@ -301,21 +304,23 @@ begin dyn:
                         result = int(floatVal)
                     elif this.stringVal.parseInt(intVal) == this.stringVal.len:
                         result = intVal
-                    elif this.stringVal.len > 0:
-                        result = 1
                     else:
-                        result = 0
+                        result = this.stringVal.len
+                of dynArray:
+                    result = this.arrayVal.len
+                of dynObject:
+                    result = this.objectVal.len
                 else:
                     raise newException(ValueError, fmt "Cannot convert [{this.kind}] to int")
 
-    converter toFloat*(): float =
+    converter asFloat*(): float =
         if this of nil:
             result = 0.0
         elif this.kind == dynFloat:
             result = this.floatVal
         else:
-#            when defined debug:
-#                echo fmt "Converting dynamic value [{this.kind}] to float"
+            when defined debug:
+                echo fmt "Converting dynamic value [{this.kind}] to float"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: 1.0 else: 0.0
@@ -329,21 +334,25 @@ begin dyn:
                         result = floatVal
                     elif this.stringVal.parseInt(intVal) == this.stringVal.len:
                         result = float(intVal)
-                    elif this.stringVal.len > 0:
-                        result = float(1)
                     else:
-                        result = float(0)
+                        result = float(this.stringVal.len)
+                of dynArray:
+                    result = float(this.arrayVal.len)
+                of dynObject:
+                    result = float(this.objectVal.len)
                 else:
                     raise newException(ValueError, fmt "Cannot convert [{this.kind}] to float")
 
-    converter toString*(): string =
+    converter asString*(): string =
         if this of nil:
             result = "null"
+        elif this.toString != nil:
+            result = this.toString(this)
         elif this.kind == dynString:
             result = this.stringVal
         else:
-#            when defined debug:
-#                echo fmt "Converting dynamic value [{this.kind}] to string"
+            when defined debug:
+                echo fmt "Converting dynamic value [{this.kind}] to string"
             case this.kind:
                 of dynBool:
                     result = if this.boolVal: "true" else: "false"
@@ -352,25 +361,27 @@ begin dyn:
                 of dynFloat:
                     result = $this.floatVal
                 of dynArray:
-                    result = this.arrayVal.mapIt(toString(it)).join()
+                    result = this.arrayVal.join()
+                of dynObject:
+                    result = $this.objectVal
                 else:
                     raise newException(ValueError, fmt "Cannot convert [{this.kind}] to string")
 
-    converter toArray*(): seq[self] =
+    converter asArray*(): seq[self] =
         if this of nil:
             result = newSeq[self]()
         if this.kind == dynArray:
             result = this.arrayVal
         else:
-#            when defined debug:
-#                echo fmt "Converting dynamic value [{this.kind}] to array (sequence)"
+            when defined debug:
+                echo fmt "Converting dynamic value [{this.kind}] to array (sequence)"
             case this.kind:
                 of dynObject:
                     result = toSeq(this.objectVal.values)
                 else:
                     result = @[this]
 
-    converter toObject*(): Table[string, self] =
+    converter asObject*(): Table[string, self] =
         if this of nil:
             result = initTable[string, dyn]()
         elif this.kind == dynObject:
@@ -387,17 +398,13 @@ begin dyn:
     #
 
     #[
-        Shorthand for string conversion, but explicitly for printing
+        Shorthand for string conversion
     ]#
     proc `$`*(): string =
         if this == nil: # Handled explicitly as you can't pass along null ref
             result = "null"
-        elif this.kind == dynArray:
-            result = "[" & this.arrayVal.join(",") & "]"
-        elif this.kind == dynObject:
-            result = $this.objectVal
         else:
-            result = toString(this)
+            result = asString(this)
 
     #[
         Shorthand for sequence conversion
@@ -406,7 +413,7 @@ begin dyn:
         if this == nil: # Handled explicitly as you can't pass along null ref
             result = newSeq[self]()
         else:
-            result = toArray(this)
+            result = asArray(this)
 
     #[
         Backwards index handler
@@ -435,7 +442,7 @@ begin dyn:
         case this.kind:
             of dynObject:
                 let
-                    key = toString(key)
+                    key = asString(key)
 
                 if this.objectVal.hasKey(key):
                     result = this.objectVal[key]
@@ -446,7 +453,7 @@ begin dyn:
                     )
             of dynArray:
                 var
-                    key = toInt(key)
+                    key = asInt(key)
                 if key < 0:
                     key = this.arrayVal.len + key
                 if key <= this.arrayVal.high and key >= this.arrayVal.low:
@@ -458,7 +465,7 @@ begin dyn:
                     )
             of dynString:
                 var
-                    key = toInt(key)
+                    key = asInt(key)
                 if key < 0:
                     key = this.stringVal.len + key
                 if key <= this.stringVal.high and key >= this.stringVal.low:
@@ -481,7 +488,7 @@ begin dyn:
         case this.kind:
             of dynObject:
                 let
-                    key = toString(key)
+                    key = asString(key)
 
                 when value is self:
                     if value of nil:
@@ -493,7 +500,7 @@ begin dyn:
                     this.objectVal[key] = value
             of dynArray:
                 let
-                    key = toInt(key)
+                    key = asInt(key)
 
                 when value is self:
                     if value of nil:
@@ -538,14 +545,14 @@ begin dyn:
             case this.kind:
                 of dynBool: # optimize for bools directly
                     result = not this.boolVal
-                else: # retain toBool centralized logic for all others
-                    result = not toBool(this)
+                else: # retain asBool centralized logic for all others
+                    result = not asBool(this)
 
     #[
         Equal
     ]#
 
-    proc `==`*(that: self): bool {. noSideEffect .} =
+    proc `==`*(that: self): bool =
         var
             error = false
 
@@ -554,29 +561,29 @@ begin dyn:
         elif that of nil:
             result = this.kind == dynNull
         elif that of bool or this of bool:
-            result = toBool(this) == toBool(that)
+            result = asBool(this) == asBool(that)
         elif (this of int or that of int) or (this of float or that of float):
-            result = toFloat(this) == toFloat(that)
+            result = asFloat(this) == asFloat(that)
         else:
             case this.kind:
                 of dynString:
                     case that.kind:
                         of dynString:
-                            result = this.stringVal == toString(that)
+                            result = this.stringVal == asString(that)
                         else:
                             error = true
                 of dynArray:
                     case that.kind:
                         of dynArray:
                             if this.arrayVal.len == that.arrayVal.len:
-                                result = this.arrayVal == that.arrayVal
+                                result = true # this.arrayVal == that.arrayVal
                         else:
                             error = true
                 of dynObject:
                     case that.kind:
                         of dynObject:
                             if this.objectVal.len == that.objectVal.len:
-                                result = this.objectVal == that.objectVal
+                                result = true # this.objectVal == that.objectVal
                         else:
                             error = true
                 else:
@@ -585,10 +592,10 @@ begin dyn:
             raise newException(ValueError, "Cannot compare (==) [{this.kind}] to [{that.kind}]")
 
     proc `==`*(that: auto): bool =
-        result = this == toDyn(that)
+        result = this == asDyn(that)
 
     proc `==`*(that: auto): bool {. infix .}=
-        result = this == toDyn(that)
+        result = this == asDyn(that)
 
     #[
         Not Equal
@@ -602,10 +609,10 @@ begin dyn:
             result = not(this == that)
 
     proc `!=`*(that: auto): bool =
-        result = this != toDyn(that)
+        result = this != asDyn(that)
 
     proc `!=`*(that: auto): bool {. infix .}=
-        result = this != toDyn(that)
+        result = this != asDyn(that)
 
     #[
         Greater Than
@@ -619,15 +626,15 @@ begin dyn:
         elif that of nil:
             result = that.kind != dynNull
         elif that of bool or this of bool:
-            result = (toBool(this) == true) and (toBool(that) == false)
+            result = (asBool(this) == true) and (asBool(that) == false)
         elif (this of int or that of int) or (this of float or that of float):
-            result = toFloat(this) > toFloat(that)
+            result = asFloat(this) > asFloat(that)
         else:
             case this.kind:
                 of dynString:
                     case that.kind:
                         of dynString:
-                            result = this.stringVal > toString(that)
+                            result = this.stringVal > asString(that)
                         else:
                             error = true
                 of dynArray:
@@ -654,10 +661,10 @@ begin dyn:
             raise newException(ValueError, "Cannot compare (>) [{this.kind}] to [{that.kind}]")
 
     proc `>`*(that: auto): bool =
-        result = this > toDyn(that)
+        result = this > asDyn(that)
 
     proc `>`*(that: auto): bool {. infix .}=
-        result = this > toDyn(that)
+        result = this > asDyn(that)
 
     #[
         Greater Than or Equal
@@ -666,10 +673,10 @@ begin dyn:
         result = (this > that) or (this == that)
 
     proc `>=`*(that: auto): bool =
-        result = this >= toDyn(that)
+        result = this >= asDyn(that)
 
     proc `>=`*(that: auto): bool {. infix .}=
-        result = this >= toDyn(that)
+        result = this >= asDyn(that)
 
     #[
         Less Than
@@ -683,15 +690,15 @@ begin dyn:
         elif that of nil:
             result = true
         elif that of bool or this of bool:
-            result = (toBool(this) == false) and (toBool(that) == true)
+            result = (asBool(this) == false) and (asBool(that) == true)
         elif (this of int or that of int) or (this of float or that of float):
-            result = toFloat(this) < toFloat(that)
+            result = asFloat(this) < asFloat(that)
         else:
             case this.kind:
                 of dynString:
                     case that.kind:
                         of dynString:
-                            result = this.stringVal < toString(that)
+                            result = this.stringVal < asString(that)
                         else:
                             error = true
                 of dynArray:
@@ -724,25 +731,25 @@ begin dyn:
         result = (this < that) or (this == that)
 
     proc `<=`*(that: auto): bool =
-        result = this <= toDyn(that)
+        result = this <= asDyn(that)
 
     proc `<=`*(that: auto): bool {. infix .}=
-        result = this <= toDyn(that)
+        result = this <= asDyn(that)
 
     #[
 
     ]#
     proc `and`*(that: auto): bool =
         if this of nil:
-            result = toBool(null) and that
+            result = asBool(null) and that
         else:
-            result = toBool(this) and that # convert known dyn value to force second if needed
+            result = asBool(this) and that # convert known dyn value to force second if needed
 
     proc `or`*(that: auto): bool =
         if this of nil:
-            result = toBool(null) or that
+            result = asBool(null) or that
         else:
-            result = toBool(this) or that # convert known dyn value to force second if needed
+            result = asBool(this) or that # convert known dyn value to force second if needed
 
     #
     # Mutation operators (needs to come before other operators, as they may be used by them)
@@ -825,7 +832,7 @@ begin dyn:
                         of dynFloat:
                             value = ~(float(this.intVal) + that.floatVal) # causes recursion if different
                         of dynString:
-                            value = ~(toString(this) & that.stringVal)
+                            value = ~(asString(this) & that.stringVal)
                         of dynArray:
                             value = deepcopy that; (deepcopy this) >> value
                         else:
@@ -837,7 +844,7 @@ begin dyn:
                         of dynFloat:
                             value = ~(this.floatVal + that.floatVal)
                         of dynString:
-                            value = ~(toString(this) & that.stringVal)
+                            value = ~(asString(this) & that.stringVal)
                         of dynArray:
                             value = deepcopy that; (deepcopy this) >> value
                         else:
@@ -845,7 +852,7 @@ begin dyn:
                 of dynString:
                     case that.kind:
                         of dynInt, dynFloat, dynString:
-                            value = ~(this.stringVal & toString(that.toString))
+                            value = ~(this.stringVal & asString(that))
                         else:
                             discard
                 of dynArray:
@@ -1093,9 +1100,9 @@ begin dyn:
             if this of nil:
                 result = -1
             elif this of array:
-                result = toArray(this).len
+                result = asArray(this).len
             elif this of object:
-                result = toObject(this).len
+                result = asObject(this).len
             elif this of bool:
                 result = if this: 1 else: 0
             elif this of int:
@@ -1103,27 +1110,27 @@ begin dyn:
                     value: string
                     sign: int = 1
                 if this < 0:
-                    value = toString(this)[1..^1]
+                    value = asString(this)[1..^1]
                     sign = -1
                 else:
-                    value = toString(this)
+                    value = asString(this)
 
-                result = sign * toInt(value.len)
+                result = sign * asInt(value.len)
             elif this of float:
                 var
                     value: string
                     sign: int = 1
                 if this < 0:
-                    value = toString(this)[1..^1]
+                    value = asString(this)[1..^1]
                     sign = -1
                 else:
-                    value = toString(this)
+                    value = asString(this)
                 let
                     split = value.find('.')
 
-                result = sign * toFloat($split & "." & $(value.len - (split + 1)))
+                result = sign * asFloat($split & "." & $(value.len - (split + 1)))
             else:
-                result = toString(this).len
+                result = asString(this).len
     )
 
     self.register(
@@ -1133,12 +1140,12 @@ begin dyn:
             if this of null:
                 result = false
             elif this of array:
-                result = toArray(this).contains(query)
+                result = asArray(this).contains(query)
             elif this of object:
                 let
-                    concern = toObject(this)
+                    concern = asObject(this)
                 if concern.hasKey(query):
                     result = concern[query] != null
             else:
-                result = toString(this).find(query) >= 0
+                result = asString(this).find(query) >= 0
     )

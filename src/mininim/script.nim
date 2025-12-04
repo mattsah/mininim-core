@@ -316,17 +316,17 @@ begin Script:
 
                 inBlock = false
                 working = working[0..head - 3] & value & working[index + 1..<working.len]
-                index = head - 3 + value.toString.len
+                index = head - 3 + asString(value).len
 
             inc index
 
         result = working
 
-    method current(): msToken {. base .}=
-        if
-            this.pos < this.tokens.len: this.tokens[this.pos]
+    method current(): msToken {. base .} =
+        if this.pos < this.tokens.len:
+            result = this.tokens[this.pos]
         else:
-            msToken(kind: msEOF)
+            result = msToken(kind: msEOF)
 
     method consume(expected: msTK, value: string = "") {. base .} =
         if this.current.kind == expected and (value == "" or value == this.current.value):

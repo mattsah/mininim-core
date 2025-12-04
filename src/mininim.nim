@@ -97,15 +97,15 @@ converter typeID*(T: typedesc): TypeID =
 
     result = id.TypeID
 
-converter toBool*(this: string): bool =
-    result = this.len > 0
-    when defined debug:
-        echo fmt "Converted [string] {this} to bool {$result}"
+#converter toBool*(this: string): bool =
+#    result = this.len > 0
+#    when defined debug:
+#        echo fmt "Converted [string] {this} to bool {$result}"
 
-converter toBool*(this: int): bool =
-    result = this != 0
-    when defined debug:
-        echo fmt "Converted [int] {$this} to bool {$result}"
+#converter toBool*(this: int): bool =
+#    result = this != 0
+#    when defined debug:
+#        echo fmt "Converted [int] {$this} to bool {$result}"
 
 #[
     Recurisvely walk an entire NimNode's treee structure and recreate it.  The resulting TreeCall
@@ -599,7 +599,7 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 ]#
 begin Class:
     method useCache*(): bool {. base .} =
-        result = os.getEnv("CACHING") == 1
+        result = parseBool(os.getEnv("CACHING", "false"))
 
 #[
 
