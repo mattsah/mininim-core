@@ -167,8 +167,11 @@ macro `as`*(procDef: typedesc[proc], body: untyped): proc =
     )
 
 #[
-    Constructor
+    Constructor and globals
 ]#
+
+proc useCache*(): bool =
+    result = parseBool(os.getEnv("CACHING", "false"))
 
 proc init*[T](this: T): void =
     discard
@@ -598,8 +601,7 @@ macro shape*(scope: typedesc, body: untyped): untyped =
 
 ]#
 begin Class:
-    method useCache*(): bool {. base .} =
-        result = parseBool(os.getEnv("CACHING", "false"))
+    discard
 
 #[
 

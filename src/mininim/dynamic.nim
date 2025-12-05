@@ -818,74 +818,65 @@ begin dyn:
     #
 
     proc `+`*(that: self): self =
-        var
-            value = null
-
+        if this of nil:
+            result = null
         if that of nil: # handles cases where a dyn variable was assigned nil and is on the right
-            value = deepcopy this
+            result = deepcopy this
         else:
             case this.kind:
                 of dynInt:
                     case that.kind:
                         of dynInt:
-                            value = ~(this.intVal + that.intVal)
+                            result = ~(this.intVal + that.intVal)
                         of dynFloat:
-                            value = ~(float(this.intVal) + that.floatVal) # causes recursion if different
+                            result = ~(float(this.intVal) + that.floatVal) # causes recursion if different
                         of dynString:
-                            value = ~(asString(this) & that.stringVal)
+                            result = ~(asString(this) & that.stringVal)
                         of dynArray:
-                            value = deepcopy that; (deepcopy this) >> value
+                            result = deepcopy that; (deepcopy this) >> result
                         else:
                             discard
                 of dynFloat:
                     case that.kind:
                         of dynInt:
-                            value = ~(this.floatVal + float(that.intVal)) # causes recursion if different
+                            result = ~(this.floatVal + float(that.intVal)) # causes recursion if different
                         of dynFloat:
-                            value = ~(this.floatVal + that.floatVal)
+                            result = ~(this.floatVal + that.floatVal)
                         of dynString:
-                            value = ~(asString(this) & that.stringVal)
+                            result = ~(asString(this) & that.stringVal)
                         of dynArray:
-                            value = deepcopy that; (deepcopy this) >> value
+                            result = deepcopy that; (deepcopy this) >> result
                         else:
                             discard
                 of dynString:
                     case that.kind:
                         of dynInt, dynFloat, dynString:
-                            value = ~(this.stringVal & asString(that))
+                            result = ~(this.stringVal & asString(that))
                         else:
                             discard
                 of dynArray:
-                    value = deepcopy this
+                    result = deepcopy this
 
                     case that.kind:
                         of dynArray:
                             for i in that.arrayVal:
-                                value.arrayVal.add(deepcopy i)
+                                result.arrayVal.add(deepcopy i)
                         else:
-                            value << (deepcopy that)
+                            result << (deepcopy that)
                 of dynBool:
                     case that.kind:
                         of dynBool:
-                            value = ~(this.boolVal or that.boolVal)
+                            result = ~(this.boolVal or that.boolVal)
                         else:
-                            value = if this.boolVal: deepcopy that else: deepcopy this
+                            result = if this.boolVal: deepcopy that else: deepcopy this
                 else:
                     discard
 
-        if value.kind == dynNull and this.kind != dynNull:
+        if result == nil:
             raise newException(
                 ValueError,
                 fmt "Unsupported operator: {$this.kind} + {$that.kind}"
             )
-
-        result = value
-
-    proc `+`*(that: self): self {. mutator .} =
-        if this of nil: # handles cases where a dyn variable was assigned nil and is on the left
-            result = null + that
-        else:
-            result = this + that
 
     #
     # Subtraction
