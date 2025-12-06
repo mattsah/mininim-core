@@ -6,6 +6,7 @@ import
 
 type
     dynType* = enum
+        dynEmpty,
         dynInt,
         dynFloat,
         dynString,
@@ -17,7 +18,7 @@ type
     dynToString* = proc(this: dyn): string
 
     dyn* = ref object of Class
-        kind: dynType
+        kind: dynType = dynEmpty
         intVal: int
         floatVal: float
         stringVal: string
@@ -822,57 +823,59 @@ begin dyn:
             result = null
         if that of nil: # handles cases where a dyn variable was assigned nil and is on the right
             result = deepcopy this
-        else:
-            case this.kind:
-                of dynInt:
-                    case that.kind:
-                        of dynInt:
-                            result = ~(this.intVal + that.intVal)
-                        of dynFloat:
-                            result = ~(float(this.intVal) + that.floatVal) # causes recursion if different
-                        of dynString:
-                            result = ~(asString(this) & that.stringVal)
-                        of dynArray:
-                            result = deepcopy that; (deepcopy this) >> result
-                        else:
-                            discard
-                of dynFloat:
-                    case that.kind:
-                        of dynInt:
-                            result = ~(this.floatVal + float(that.intVal)) # causes recursion if different
-                        of dynFloat:
-                            result = ~(this.floatVal + that.floatVal)
-                        of dynString:
-                            result = ~(asString(this) & that.stringVal)
-                        of dynArray:
-                            result = deepcopy that; (deepcopy this) >> result
-                        else:
-                            discard
-                of dynString:
-                    case that.kind:
-                        of dynInt, dynFloat, dynString:
-                            result = ~(this.stringVal & asString(that))
-                        else:
-                            discard
-                of dynArray:
-                    result = deepcopy this
+        case this.kind:
+            of dynNull:
+                result = null
+            of dynInt:
+                case that.kind:
+                    of dynInt:
+                        result = ~(this.intVal + that.intVal)
+                    of dynFloat:
+                        result = ~(float(this.intVal) + that.floatVal) # causes recursion if different
+                    of dynString:
+                        result = ~(asString(this) & that.stringVal)
+                    of dynArray:
+                        result = deepcopy that; (deepcopy this) >> result
+                    else:
+                        discard
+            of dynFloat:
+                case that.kind:
+                    of dynInt:
+                        result = ~(this.floatVal + float(that.intVal)) # causes recursion if different
+                    of dynFloat:
+                        result = ~(this.floatVal + that.floatVal)
+                    of dynString:
+                        result = ~(asString(this) & that.stringVal)
+                    of dynArray:
+                        result = deepcopy that; (deepcopy this) >> result
+                    else:
+                        discard
+            of dynString:
+                case that.kind:
+                    of dynInt, dynFloat, dynString:
+                        result = ~(this.stringVal & asString(that))
+                    else:
+                        discard
+            of dynArray:
+                result = deepcopy this
 
-                    case that.kind:
-                        of dynArray:
-                            for i in that.arrayVal:
-                                result.arrayVal.add(deepcopy i)
-                        else:
-                            result << (deepcopy that)
-                of dynBool:
-                    case that.kind:
-                        of dynBool:
-                            result = ~(this.boolVal or that.boolVal)
-                        else:
-                            result = if this.boolVal: deepcopy that else: deepcopy this
-                else:
-                    discard
+                case that.kind:
+                    of dynArray:
+                        for i in that.arrayVal:
+                            result.arrayVal.add(deepcopy i)
+                    else:
+                        result << (deepcopy that)
+            of dynBool:
+                case that.kind:
+                    of dynBool:
+                        result = ~(this.boolVal or that.boolVal)
+                    else:
+                        result = if this.boolVal: deepcopy that else: deepcopy this
+            else:
+                discard
 
-        if result == nil:
+        if result.kind == dynEmpty:
+            echo $result.kind
             raise newException(
                 ValueError,
                 fmt "Unsupported operator: {$this.kind} + {$that.kind}"
