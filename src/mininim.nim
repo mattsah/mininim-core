@@ -1,11 +1,11 @@
 import
+    mininim/missing,
     std/sets,
     std/json,
     std/macros,
     std/tables,
     std/marshal,
     std/sequtils,
-    std/macrocache,
     std/typetraits,
     std/strformat,
     std/algorithm,
@@ -17,13 +17,13 @@ import
     std/os
 
 export
+    missing,
     sets,
     json,
     macros,
     tables,
     marshal,
     sequtils,
-    macrocache,
     typetraits,
     strformat,
     algorithm,
@@ -35,8 +35,6 @@ export
     os
 
 type
-    TypeID* = uint16
-
     Class* {. inheritable .} = ref object
         app*: App
 
@@ -72,7 +70,6 @@ type
     ]
 
 const
-    nextTypeID = CacheCounter("mininim.typeCounter")
     typeIndex = CacheTable("mininim.typeIndex")
     typeCode = CacheTable("mininim.typeCode")
 
@@ -86,26 +83,6 @@ let
 #[
     Converters and syntactic sugar
 ]#
-converter typeID*(T: typedesc): TypeID =
-    const id = nextTypeID.value
-
-    static:
-        when defined(debug):
-            echo fmt "Registering {$T} with id {id}"
-
-        inc nextTypeID
-
-    result = id.TypeID
-
-#converter toBool*(this: string): bool =
-#    result = this.len > 0
-#    when defined debug:
-#        echo fmt "Converted [string] {this} to bool {$result}"
-
-#converter toBool*(this: int): bool =
-#    result = this != 0
-#    when defined debug:
-#        echo fmt "Converted [int] {$this} to bool {$result}"
 
 #[
     Recurisvely walk an entire NimNode's treee structure and recreate it.  The resulting TreeCall
@@ -134,8 +111,6 @@ proc `%`*(t: tuple): JsonNode =
 proc `%`*(p: proc): JsonNode =
     result = newJString("<proc>")
 
-proc type*(self: typedesc): TypeID =
-    result = self.typeID
 
 #[
     Internal procedure used by the `as` macro as well as the `resolveHook` macro to transform
