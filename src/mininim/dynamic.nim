@@ -1,8 +1,7 @@
 {. experimental: "dotOperators" .}
 
 import
-    mininim,
-    std/parseutils
+    mininim
 
 type
     dynType* = enum

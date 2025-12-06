@@ -1,8 +1,14 @@
 import
-    std/macrocache
+    std/macrocache,
+    std/parseutils,
+    std/strformat,
+    std/strutils
 
 export
-    macrocache
+    macrocache,
+    parseutils,
+    strformat,
+    strutils
 
 #[
     Stored "type" support
@@ -32,7 +38,10 @@ proc type*(self: typedesc): TypeID =
     Boolean converters
 ]#
 converter toBool*(this: string): bool =
-    result = this.len > 0
+    if this.len == 0:
+        result = false
+    else:
+        result = parseBool(this)
     when defined debug:
         echo fmt "Converted [string] {this} to bool {$result}"
 
@@ -54,6 +63,7 @@ proc `[]`*[T](this: Slice[T], idx: int): T =
 #[
     Traversable and functional handling
 ]#
+
 type
     iteratable*[T] = concept self
         T
