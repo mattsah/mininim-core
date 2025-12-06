@@ -1,7 +1,6 @@
 import
     mininim,
-    mininim/dynamic,
-    std/parseutils
+    mininim/dynamic
 
 export
     dynamic
